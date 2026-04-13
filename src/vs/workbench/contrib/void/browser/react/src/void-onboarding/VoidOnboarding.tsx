@@ -29,7 +29,7 @@ export const VoidOnboarding = () => {
 			{!isOnboardingComplete && (
 				<>
 					<div
-						className="fixed top-0 left-0 right-0 h-9 z-[100000]"
+						className="fixed top-9 left-0 right-0 h-9 z-[100000]"
 						style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
 					/>
 					<LanguageSelector />
@@ -148,7 +148,7 @@ const LanguageSelector = () => {
 	const locales = getSupportedLocales();
 
 	return (
-		<div className="fixed top-2 right-4 flex items-center gap-2 z-[100000]"
+		<div className="fixed top-10 right-4 flex items-center gap-2 z-[100000]"
 			style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
 		>
 			<Globe className="w-4 h-4 text-void-fg-3 opacity-60" />

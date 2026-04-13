@@ -269,7 +269,7 @@ export function getTitleBarStyle(configurationService: IConfigurationService): T
 		}
 	}
 
-	return TitlebarStyle.NATIVE; // default to native on all OS
+	return TitlebarStyle.CUSTOM; // default to custom title bar
 }
 
 export function getWindowControlsStyle(configurationService: IConfigurationService): WindowControlsStyle {
