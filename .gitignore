@@ -37,6 +37,7 @@ VoidSetup-x64-*.exe
 # 临时分析文档和脚本
 temp-*
 temp_*
+!文档/temp-*
 check-dom.*
 
 # 编译日志和产物

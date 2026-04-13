@@ -25,6 +25,16 @@ export const VoidOnboarding = () => {
 
 	return (
 		<div className={`@@void-scope ${isDark ? 'dark' : ''}`}>
+			{/* Top drag region — enables window dragging over the onboarding overlay */}
+			{!isOnboardingComplete && (
+				<>
+					<div
+						className="fixed top-0 left-0 right-0 h-9 z-[100000]"
+						style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+					/>
+					<LanguageSelector />
+				</>
+			)}
 			<div
 				className={`
 					bg-void-bg-3 fixed top-0 right-0 bottom-0 left-0 width-full z-[99999]
@@ -138,7 +148,9 @@ const LanguageSelector = () => {
 	const locales = getSupportedLocales();
 
 	return (
-		<div className="absolute top-4 right-4 flex items-center gap-2 z-10">
+		<div className="fixed top-2 right-4 flex items-center gap-2 z-[100000]"
+			style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+		>
 			<Globe className="w-4 h-4 text-void-fg-3 opacity-60" />
 			<div className="flex rounded-md overflow-hidden border border-void-border-2">
 				{locales.map(l => (
@@ -629,9 +641,7 @@ const VoidOnboardingContent = () => {
 
 
 	const contentOfIdx: { [pageIndex: number]: React.ReactNode } = {
-		0: <div className="relative w-full">
-			<LanguageSelector />
-			<OnboardingPageShell
+		0: <OnboardingPageShell
 			content={
 				<div className='flex flex-col items-center gap-8'>
 					<div className="text-5xl font-light text-center">{t('onboarding.welcome')}</div>
@@ -654,8 +664,7 @@ const VoidOnboardingContent = () => {
 
 				</div>
 			}
-		/>
-		</div>,
+		/>,
 
 		1: <OnboardingPageShell hasMaxWidth={false}
 			content={
