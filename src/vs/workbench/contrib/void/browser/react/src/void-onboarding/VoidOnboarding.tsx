@@ -12,6 +12,7 @@ import { OllamaSetupInstructions, OneClickSwitchButton, SettingsForProvider, Mod
 import { ColorScheme } from '../../../../../../../platform/theme/common/theme.js';
 import ErrorBoundary from '../sidebar-tsx/ErrorBoundary.js';
 import { isLinux } from '../../../../../../../base/common/platform.js';
+import { t, useLocale, getSupportedLocales, SupportedLocale } from '../i18n/index.js';
 
 const OVERRIDE_VALUE = false
 
@@ -95,39 +96,64 @@ const FadeIn = ({ children, className, delayMs = 0, durationMs, ...props }: { ch
 //  New AddProvidersPage Component and helpers
 // =============================================
 
-const tabNames = ['Free', 'Paid', 'Local'] as const;
+const tabNameKeys = ['free', 'paid', 'local'] as const;
+type TabNameKey = typeof tabNameKeys[number] | 'cloudOther';
 
-type TabName = typeof tabNames[number] | 'Cloud/Other';
+const tabKeyToI18n: Record<TabNameKey, keyof import('../i18n/types.js').TranslationKeys> = {
+	free: 'onboarding.free',
+	paid: 'onboarding.paid',
+	local: 'onboarding.local',
+	cloudOther: 'onboarding.cloudOther',
+};
 
 // Data for cloud providers tab
 const cloudProviders: ProviderName[] = ['googleVertex', 'liteLLM', 'microsoftAzure', 'awsBedrock', 'openAICompatible'];
 
 // Data structures for provider tabs
-const providerNamesOfTab: Record<TabName, ProviderName[]> = {
-	Free: ['gemini', 'openRouter'],
-	Local: localProviderNames,
-	Paid: providerNames.filter(pn => !(['gemini', 'openRouter', ...localProviderNames, ...cloudProviders] as string[]).includes(pn)) as ProviderName[],
-	'Cloud/Other': cloudProviders,
+const providerNamesOfTab: Record<TabNameKey, ProviderName[]> = {
+	free: ['gemini', 'openRouter'],
+	local: localProviderNames,
+	paid: providerNames.filter(pn => !(['gemini', 'openRouter', ...localProviderNames, ...cloudProviders] as string[]).includes(pn)) as ProviderName[],
+	cloudOther: cloudProviders,
 };
 
-const descriptionOfTab: Record<TabName, string> = {
-	Free: `Providers with a 100% free tier. Add as many as you'd like!`,
-	Paid: `Connect directly with any provider (bring your own key).`,
-	Local: `Active providers should appear automatically. Add as many as you'd like! `,
-	'Cloud/Other': `Add as many as you'd like! Reach out for custom configuration requests.`,
+const descKeyOfTab: Record<TabNameKey, keyof import('../i18n/types.js').TranslationKeys> = {
+	free: 'onboarding.freeDesc',
+	paid: 'onboarding.paidDesc',
+	local: 'onboarding.localDesc',
+	cloudOther: 'onboarding.cloudOtherDesc',
 };
 
 
-const featureNameMap: { display: string, featureName: FeatureName }[] = [
-	{ display: 'Chat', featureName: 'Chat' },
-	{ display: 'Quick Edit', featureName: 'Ctrl+K' },
-	{ display: 'Autocomplete', featureName: 'Autocomplete' },
-	{ display: 'Fast Apply', featureName: 'Apply' },
-	{ display: 'Source Control', featureName: 'SCM' },
+const featureNameMap: { displayKey: keyof import('../i18n/types.js').TranslationKeys, featureName: FeatureName }[] = [
+	{ displayKey: 'onboarding.featureChat', featureName: 'Chat' },
+	{ displayKey: 'onboarding.featureQuickEdit', featureName: 'Ctrl+K' },
+	{ displayKey: 'onboarding.featureAutocomplete', featureName: 'Autocomplete' },
+	{ displayKey: 'onboarding.featureFastApply', featureName: 'Apply' },
+	{ displayKey: 'onboarding.featureSourceControl', featureName: 'SCM' },
 ];
 
+const LanguageSelector = () => {
+	const [locale, changeLocale] = useLocale();
+	const locales = getSupportedLocales();
+
+	return (
+		<div className="flex items-center gap-2">
+			<select
+				value={locale}
+				onChange={(e) => changeLocale(e.target.value as SupportedLocale)}
+				className="bg-void-bg-2 text-void-fg-1 border border-void-border-2 rounded px-2 py-1 text-sm cursor-pointer"
+			>
+				{locales.map(l => (
+					<option key={l.id} value={l.id}>{l.label}</option>
+				))}
+			</select>
+		</div>
+	);
+};
+
 const AddProvidersPage = ({ pageIndex, setPageIndex }: { pageIndex: number, setPageIndex: (index: number) => void }) => {
-	const [currentTab, setCurrentTab] = useState<TabName>('Free');
+	const [currentTab, setCurrentTab] = useState<TabNameKey>('free');
 	const settingsState = useSettingsState();
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -149,31 +175,33 @@ const AddProvidersPage = ({ pageIndex, setPageIndex }: { pageIndex: number, setP
 		};
 	}, [errorMessage]);
 
+	const [, _forceUpdate] = useLocale();
+
 	return (<div className="flex flex-col md:flex-row w-full h-[80vh] gap-6 max-w-[900px] mx-auto relative">
 		{/* Left Column */}
 		<div className="md:w-1/4 w-full flex flex-col gap-6 p-6 border-none border-void-border-2 h-full overflow-y-auto">
 			{/* Tab Selector */}
 			<div className="flex md:flex-col gap-2">
-				{[...tabNames, 'Cloud/Other'].map(tab => (
+				{([...tabNameKeys, 'cloudOther'] as TabNameKey[]).map(tabKey => (
 					<button
-						key={tab}
-						className={`py-2 px-4 rounded-md text-left ${currentTab === tab
+						key={tabKey}
+						className={`py-2 px-4 rounded-md text-left ${currentTab === tabKey
 							? 'bg-[#0e70c0]/80 text-white font-medium shadow-sm'
 							: 'bg-void-bg-2 hover:bg-void-bg-2/80 text-void-fg-1'
 							} transition-all duration-200`}
 						onClick={() => {
-							setCurrentTab(tab as TabName);
-							setErrorMessage(null); // Reset error message when changing tabs
+							setCurrentTab(tabKey);
+							setErrorMessage(null);
 						}}
 					>
-						{tab}
+						{t(tabKeyToI18n[tabKey])}
 					</button>
 				))}
 			</div>
 
 			{/* Feature Checklist */}
 			<div className="flex flex-col gap-1 mt-4 text-sm opacity-80">
-				{featureNameMap.map(({ display, featureName }) => {
+				{featureNameMap.map(({ displayKey, featureName }) => {
 					const hasModel = settingsState.modelSelectionOfFeature[featureName] !== null;
 					return (
 						<div key={featureName} className="flex items-center gap-2">
@@ -184,7 +212,7 @@ const AddProvidersPage = ({ pageIndex, setPageIndex }: { pageIndex: number, setP
 									<div className="w-1 h-1 rounded-full bg-white/70"></div>
 								</div>
 							)}
-							<span>{display}</span>
+							<span>{t(displayKey)}</span>
 						</div>
 					);
 				})}
@@ -193,17 +221,17 @@ const AddProvidersPage = ({ pageIndex, setPageIndex }: { pageIndex: number, setP
 
 		{/* Right Column */}
 		<div className="flex-1 flex flex-col items-center justify-start p-6 h-full overflow-y-auto">
-			<div className="text-5xl mb-2 text-center w-full">Add a Provider</div>
+			<div className="text-5xl mb-2 text-center w-full">{t('onboarding.addProvider')}</div>
 
 			<div className="w-full max-w-xl mt-4 mb-10">
-				<div className="text-4xl font-light my-4 w-full">{currentTab}</div>
-				<div className="text-sm opacity-80 text-void-fg-3 my-4 w-full">{descriptionOfTab[currentTab]}</div>
+				<div className="text-4xl font-light my-4 w-full">{t(tabKeyToI18n[currentTab])}</div>
+				<div className="text-sm opacity-80 text-void-fg-3 my-4 w-full">{t(descKeyOfTab[currentTab])}</div>
 			</div>
 
 			{providerNamesOfTab[currentTab].map((providerName) => (
 				<div key={providerName} className="w-full max-w-xl mb-10">
 					<div className="text-xl mb-2">
-						Add {displayInfoOfProviderName(providerName).title}
+						{t('onboarding.add')} {displayInfoOfProviderName(providerName).title}
 						{providerName === 'gemini' && (
 							<span
 								data-tooltip-id="void-tooltip-provider-info"
@@ -229,18 +257,18 @@ const AddProvidersPage = ({ pageIndex, setPageIndex }: { pageIndex: number, setP
 				</div>
 			))}
 
-			{(currentTab === 'Local' || currentTab === 'Cloud/Other') && (
+			{(currentTab === 'local' || currentTab === 'cloudOther') && (
 				<div className="w-full max-w-xl mt-8 bg-void-bg-2/50 rounded-lg p-6 border border-void-border-4">
 					<div className="flex items-center gap-2 mb-4">
-						<div className="text-xl font-medium">Models</div>
+						<div className="text-xl font-medium">{t('onboarding.models')}</div>
 					</div>
 
-					{currentTab === 'Local' && (
-						<div className="text-sm opacity-80 text-void-fg-3 my-4 w-full">Local models should be detected automatically. You can add custom models below.</div>
+					{currentTab === 'local' && (
+						<div className="text-sm opacity-80 text-void-fg-3 my-4 w-full">{t('onboarding.localModelsAutoDetect')}</div>
 					)}
 
-					{currentTab === 'Local' && <ModelDump filteredProviders={localProviderNames} />}
-					{currentTab === 'Cloud/Other' && <ModelDump filteredProviders={cloudProviders} />}
+					{currentTab === 'local' && <ModelDump filteredProviders={localProviderNames} />}
+					{currentTab === 'cloudOther' && <ModelDump filteredProviders={cloudProviders} />}
 				</div>
 			)}
 
@@ -262,7 +290,7 @@ const AddProvidersPage = ({ pageIndex, setPageIndex }: { pageIndex: number, setP
 								setErrorMessage(null);
 							} else {
 								// Show error message
-								setErrorMessage("Please set up at least one Chat model before moving on.");
+								setErrorMessage(t('onboarding.chatModelRequired'));
 							}
 						}}
 					/>
@@ -329,12 +357,12 @@ const NextButton = ({ onClick, ...props }: { onClick: () => void } & React.Butto
 			`}
 			{...disabled && {
 				'data-tooltip-id': 'void-tooltip',
-				"data-tooltip-content": 'Please enter all required fields or choose another provider', // (double-click to proceed anyway, can come back in Settings)
+				"data-tooltip-content": t('onboarding.nextTooltip'),
 				"data-tooltip-place": 'top',
 			}}
 			{...buttonProps}
 		>
-			Next
+			{t('onboarding.next')}
 		</button>
 	)
 }
@@ -346,7 +374,7 @@ const PreviousButton = ({ onClick, ...props }: { onClick: () => void } & React.B
 			className="px-6 py-2 rounded text-void-fg-3 opacity-80 hover:brightness-115 duration-600 transition-all"
 			{...props}
 		>
-			Back
+			{t('onboarding.back')}
 		</button>
 	)
 }
@@ -393,9 +421,9 @@ const YesNoText = ({ val }: { val: boolean | null }) => {
 		}
 	>
 		{
-			val === true ? "Yes"
-				: val === false ? 'No'
-					: "Yes*"
+			val === true ? t('common.yes')
+				: val === false ? t('common.no')
+					: t('common.yesStar')
 		}
 	</div>
 
@@ -469,6 +497,7 @@ type WantToUseOption = 'smart' | 'private' | 'cheap' | 'all'
 
 const VoidOnboardingContent = () => {
 
+	const [, _forceLocaleUpdate] = useLocale();
 
 	const accessor = useAccessor()
 	const voidSettingsService = accessor.get('IVoidSettingsService')
@@ -547,7 +576,7 @@ const VoidOnboardingContent = () => {
 					voidMetricsService.capture('Completed Onboarding', { selectedProviderName, wantToUseOption })
 				}}
 				ringSize={voidSettingsState.globalSettings.isOnboardingComplete ? 'screen' : undefined}
-			>Enter the Void</PrimaryActionButton>
+			>{t('onboarding.enterTheVoid')}</PrimaryActionButton>
 		</div>
 	</div>
 
@@ -596,8 +625,8 @@ const VoidOnboardingContent = () => {
 		0: <OnboardingPageShell
 			content={
 				<div className='flex flex-col items-center gap-8'>
-					<div className="text-5xl font-light text-center">Welcome to Void</div>
-				<div className="text-2xl font-light text-center opacity-70">欢迎来到编辑器</div>
+					<LanguageSelector />
+					<div className="text-5xl font-light text-center">{t('onboarding.welcome')}</div>
 
 					{/* Slice of Void image */}
 					<div className='max-w-md w-full h-[30vh] mx-auto flex items-center justify-center'>
@@ -611,7 +640,7 @@ const VoidOnboardingContent = () => {
 						<PrimaryActionButton
 							onClick={() => { setPageIndex(1) }}
 						>
-							Get Started
+							{t('onboarding.getStarted')}
 						</PrimaryActionButton>
 					</FadeIn>
 
@@ -628,10 +657,10 @@ const VoidOnboardingContent = () => {
 
 			content={
 				<div>
-					<div className="text-5xl font-light text-center">Settings and Themes</div>
+					<div className="text-5xl font-light text-center">{t('onboarding.settingsAndThemes')}</div>
 
 					<div className="mt-8 text-center flex flex-col items-center gap-4 w-full max-w-md mx-auto">
-						<h4 className="text-void-fg-3 mb-4">Transfer your settings from an existing editor?</h4>
+						<h4 className="text-void-fg-3 mb-4">{t('onboarding.transferSettings')}</h4>
 						<OneClickSwitchButton className='w-full px-4 py-2' fromEditor="VS Code" />
 						<OneClickSwitchButton className='w-full px-4 py-2' fromEditor="Cursor" />
 						<OneClickSwitchButton className='w-full px-4 py-2' fromEditor="Windsurf" />
