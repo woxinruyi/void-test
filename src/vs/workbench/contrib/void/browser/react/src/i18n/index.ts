@@ -63,10 +63,10 @@ export function useLocale(): [SupportedLocale, (locale: SupportedLocale) => void
 	return [locale, changeLocale];
 }
 
-export function getSupportedLocales(): { id: SupportedLocale; label: string }[] {
+export function getSupportedLocales(): { id: SupportedLocale; label: string; shortLabel: string }[] {
 	return [
-		{ id: 'zh-cn', label: '简体中文' },
-		{ id: 'en', label: 'English' },
+		{ id: 'zh-cn', label: '简体中文', shortLabel: '中文' },
+		{ id: 'en', label: 'English', shortLabel: 'EN' },
 	];
 }
 

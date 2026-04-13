@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useAccessor, useIsDark, useSettingsState } from '../util/services.js';
-import { Brain, Check, ChevronRight, DollarSign, ExternalLink, Lock, X } from 'lucide-react';
+import { Brain, Check, ChevronRight, DollarSign, ExternalLink, Globe, Lock, X } from 'lucide-react';
 import { displayInfoOfProviderName, ProviderName, providerNames, localProviderNames, featureNames, FeatureName, isFeatureNameDisabled } from '../../../../common/voidSettingsTypes.js';
 import { ChatMarkdownRender } from '../markdown/ChatMarkdownRender.js';
 import { OllamaSetupInstructions, OneClickSwitchButton, SettingsForProvider, ModelDump } from '../void-settings-tsx/Settings.js';
@@ -138,16 +138,23 @@ const LanguageSelector = () => {
 	const locales = getSupportedLocales();
 
 	return (
-		<div className="flex items-center gap-2">
-			<select
-				value={locale}
-				onChange={(e) => changeLocale(e.target.value as SupportedLocale)}
-				className="bg-void-bg-2 text-void-fg-1 border border-void-border-2 rounded px-2 py-1 text-sm cursor-pointer"
-			>
+		<div className="absolute top-4 right-4 flex items-center gap-2 z-10">
+			<Globe className="w-4 h-4 text-void-fg-3 opacity-60" />
+			<div className="flex rounded-md overflow-hidden border border-void-border-2">
 				{locales.map(l => (
-					<option key={l.id} value={l.id}>{l.label}</option>
+					<button
+						key={l.id}
+						onClick={() => changeLocale(l.id)}
+						className={`px-3 py-1 text-xs font-medium transition-all duration-150
+							${locale === l.id
+								? 'bg-[#0e70c0]/80 text-white'
+								: 'bg-void-bg-2/50 text-void-fg-3 hover:bg-void-bg-2 hover:text-void-fg-1'
+							}`}
+					>
+						{l.shortLabel}
+					</button>
 				))}
-			</select>
+			</div>
 		</div>
 	);
 };
@@ -622,10 +629,11 @@ const VoidOnboardingContent = () => {
 
 
 	const contentOfIdx: { [pageIndex: number]: React.ReactNode } = {
-		0: <OnboardingPageShell
+		0: <div className="relative w-full">
+			<LanguageSelector />
+			<OnboardingPageShell
 			content={
 				<div className='flex flex-col items-center gap-8'>
-					<LanguageSelector />
 					<div className="text-5xl font-light text-center">{t('onboarding.welcome')}</div>
 
 					{/* Slice of Void image */}
@@ -646,7 +654,8 @@ const VoidOnboardingContent = () => {
 
 				</div>
 			}
-		/>,
+		/>
+		</div>,
 
 		1: <OnboardingPageShell hasMaxWidth={false}
 			content={
