@@ -225,6 +225,21 @@ class LoadingGenerateCommitMessageAction extends Action2 {
 	}
 }
 
+// Renderer-side proxy for IVoidSCMService. editCodeService / convertToLLMMessageService
+// inject @IVoidSCMService, but nothing registered it in the renderer DI container, so their
+// instantiation threw "depends on voidSCMService which is NOT registered" — which cascaded
+// to the settings pane mount. Register the proxy (same channel GenerateCommitMessageService uses).
+// @ts-ignore: interface is implemented via proxy
+class VoidSCMRendererService implements IVoidSCMService {
+	declare readonly _serviceBrand: undefined;
+	constructor(
+		@IMainProcessService mainProcessService: IMainProcessService
+	) {
+		return ProxyChannel.toService<IVoidSCMService>(mainProcessService.getChannel('void-channel-scm'))
+	}
+}
+
 registerAction2(GenerateCommitMessageAction)
 registerAction2(LoadingGenerateCommitMessageAction)
 registerSingleton(IGenerateCommitMessageService, GenerateCommitMessageService, InstantiationType.Delayed)
+registerSingleton(IVoidSCMService, VoidSCMRendererService, InstantiationType.Delayed)

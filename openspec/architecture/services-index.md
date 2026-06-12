@@ -70,3 +70,4 @@
 |------|------|----------|
 | 2026-05-26 | 初始创建：全服务索引 | enhance-agent-prompt-and-context |
 | 2026-06-12 | 补注册图可达性约束；修复 IMarketplaceService 孤儿注册 | fix-settings-pane-mount-resilience |
+| 2026-06-12 | 修复 IVoidSCMService 渲染进程漏注册（注入但无 registerSingleton） | fix-settings-pane-mount-resilience |

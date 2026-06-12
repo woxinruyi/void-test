@@ -1,11 +1,12 @@
 # 任务：修复设置面板挂载失败 + 加固错误隔离
 
-## Phase 0 — 根因修复（治标）
+## Phase 0 — 根因修复
 
-- [x] `void.contribution.ts` 增加 `import './marketplaceService.js'`，使 `IMarketplaceService` 在 workbench 启动时注册
+- [x] **P0-a** `voidSCMService.ts` 注册渲染侧 `IVoidSCMService`（ProxyChannel，VoidSCMRendererService）—— 首个抛错的真因
+- [x] **P0-b** `void.contribution.ts` 增加 `import './marketplaceService.js'`，使 `IMarketplaceService` 注册
 - [x] **编译验证：`node build.js`（React bundle）Build success**
-- [x] **编译验证：`npx tsc -p src/tsconfig.json --noEmit` 0 errors**
-- [ ] 启动应用点击设置，确认 Tab 恢复显示（人工）
+- [x] **编译验证：`gulp compile-client` + `npx tsc -p src/tsconfig.json --noEmit` 0 errors**
+- [x] CDP 自动化验证：设置面板挂载，七分区全渲染，无降级/报错
 
 ## Phase 1 — 错误隔离（治本）
 
