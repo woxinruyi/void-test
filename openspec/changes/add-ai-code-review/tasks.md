@@ -17,13 +17,15 @@
 - [x] **编译验证：`npx tsc -p src/tsconfig.json --noEmit` 0 errors**
 - [ ] 子代理取上下文（可选增强，暂未做）
 
-## Phase 3 — 结果视图
+## Phase 3 — 结果视图（采用原生诊断方案 C）✅
 
-- [ ] 新增只读"审查结果"EditorInput/Pane（镜像 voidSettingsPane）+ React 列表渲染发现
-- [ ] 挂载层复用 `mountFnGenerator` try/catch + 根 ErrorBoundary（错误隔离）
-- [ ] 点击发现 → `editorService.openEditor` 跳转文件 + 行
-- [ ] 无改动 / 无发现 / LLM 失败的友好提示
-- [ ] **编译验证：`node build.js` + `npx tsc -p src/tsconfig.json --noEmit` 0 errors**
+- [x] `IMarkerService.changeAll('void-code-review', markers)` 发布 findings 为诊断
+      （bug→Error / risk→Warning / nit→Info；定位 file:line；repo 相对路径 → URI.joinPath）
+- [x] 原生「问题」面板可点击跳转 + 编辑器行内波浪线；同时打开 markdown 摘要编辑器
+- [x] 每次运行 changeAll 重置 owner 标记（清理上次结果 / 无发现时清空）
+- [x] 无改动 / 无 git 仓库 / 无发现 / LLM 失败 的友好提示（沿用 Phase 2）
+- [x] 仅改 `reviewService.ts` 一个文件，零新 UI 管线，不触碰 getReactAccessor
+- [x] **编译验证：`npx tsc -p src/tsconfig.json --noEmit` 0 errors**
 
 ## Phase 4 — 验证与归档
 

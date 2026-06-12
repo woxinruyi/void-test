@@ -20,6 +20,10 @@ import { Disposable } from '../../../../base/common/lifecycle.js'
 import { INotificationService } from '../../../../platform/notification/common/notification.js'
 import { IEditorService } from '../../../services/editor/common/editorService.js'
 import { CancellationError, isCancellationError } from '../../../../base/common/errors.js'
+import { IMarkerService, MarkerSeverity, IResourceMarker } from '../../../../platform/markers/common/markers.js'
+import { URI } from '../../../../base/common/uri.js'
+
+const REVIEW_MARKER_OWNER = 'void-code-review'
 
 export interface IReviewService {
 	readonly _serviceBrand: undefined
@@ -41,6 +45,7 @@ class ReviewService extends Disposable implements IReviewService {
 		@IVoidSettingsService private readonly voidSettingsService: IVoidSettingsService,
 		@INotificationService private readonly notificationService: INotificationService,
 		@IEditorService private readonly editorService: IEditorService,
+		@IMarkerService private readonly markerService: IMarkerService,
 	) {
 		super()
 	}
@@ -89,7 +94,7 @@ class ReviewService extends Disposable implements IReviewService {
 		}
 
 		const findings = this.parseFindings(fullText)
-		await this.renderFindings(findings, fullText)
+		await this.renderFindings(findings, path)
 	}
 
 	abort() {
@@ -108,15 +113,36 @@ class ReviewService extends Disposable implements IReviewService {
 		}
 	}
 
-	private async renderFindings(findings: ReviewFinding[], rawText: string): Promise<void> {
+	private severityToMarker(s: string): MarkerSeverity {
+		return s === 'bug' ? MarkerSeverity.Error : s === 'risk' ? MarkerSeverity.Warning : MarkerSeverity.Info
+	}
+
+	private async renderFindings(findings: ReviewFinding[], repoPath: string): Promise<void> {
+		// always reset this owner's markers (clears stale results on re-run / no findings)
+		const resourceMarkers: IResourceMarker[] = findings.map(f => {
+			const resource = URI.joinPath(URI.file(repoPath), ...String(f.file).split(/[\\/]/).filter(Boolean))
+			const line = Math.max(1, Number(f.line) || 1)
+			return {
+				resource,
+				marker: {
+					severity: this.severityToMarker(f.severity),
+					message: `${f.title}\n${f.detail}${f.suggestion ? `\n建议：${f.suggestion}` : ''}`,
+					source: 'YWCode Review',
+					startLineNumber: line, startColumn: 1, endLineNumber: line, endColumn: 1,
+				},
+			}
+		})
+		this.markerService.changeAll(REVIEW_MARKER_OWNER, resourceMarkers)
+
 		if (findings.length === 0) {
 			this.notificationService.info(localize2('voidReviewClean', '代码审查完成：未发现问题。').value)
 			return
 		}
+
 		const order = { bug: 0, risk: 1, nit: 2 } as const
 		const sorted = [...findings].sort((a, b) => (order[a.severity] ?? 9) - (order[b.severity] ?? 9))
 		const icon = (s: string) => s === 'bug' ? '🛑' : s === 'risk' ? '⚠️' : '💡'
-		const lines: string[] = [`# 代码审查结果（${findings.length} 项）`, '']
+		const lines: string[] = [`# 代码审查结果（${findings.length} 项）`, '', '> 问题已同时发布到「问题」面板，可点击跳转到对应文件行。', '']
 		for (const f of sorted) {
 			lines.push(`## ${icon(f.severity)} ${f.severity.toUpperCase()} · ${f.file}:${f.line}`)
 			lines.push(`**${f.title}**`, '', f.detail)
@@ -125,9 +151,8 @@ class ReviewService extends Disposable implements IReviewService {
 		}
 		const md = lines.join('\n')
 
-		this.notificationService.info(localize2('voidReviewDone', '代码审查完成：发现 {0} 项。', findings.length).value)
+		this.notificationService.info(localize2('voidReviewDone', '代码审查完成：发现 {0} 项（见「问题」面板）。', findings.length).value)
 		await this.editorService.openEditor({ resource: undefined, contents: md, languageId: 'markdown', options: { pinned: true } })
-		void rawText
 	}
 
 	private sendLLMMessage(messages: LLMChatMessage[], separateSystemMessage: string, modelSelection: any, modelSelectionOptions: any, overridesOfModel: any): Promise<string> {

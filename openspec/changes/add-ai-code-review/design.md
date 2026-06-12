@@ -51,10 +51,15 @@ main 侧实现 = `git diff [compareRef]`（含 `--no-color`，截断到上限字
 
 system prompt 置于 `common/prompt/prompts.ts`（与 `gitCommitMessage_systemMessage` 同处），中文说明 + 严格 JSON 输出约束 + "无问题则返回空 findings"。
 
-## 渲染目标（择一，建议 A）
+## 渲染目标（最终采用 C — 原生诊断）
 
-- **A（轻量，推荐）**：复用 `VoidSettingsPane` 的 EditorInput/Pane 模式，新增一个只读"审查结果"EditorPane，React 列表渲染发现、点击 `editorService.openEditor` 跳转。错误隔离沿用本周加固的 `mountFnGenerator` try/catch + 根 ErrorBoundary。
-- B（更省事）：作为一条 assistant 聊天消息插入当前 thread，Markdown 渲染 + 文件链接。
+实现时选择了比 A/B 更地道、风险更低的方案 **C**：
+
+- **C（已采用）原生诊断**：用 `IMarkerService.changeAll('void-code-review', markers)` 把每条 finding 发布为 marker（bug→Error / risk→Warning / nit→Info），定位到 `file:line`。
+  - 直接出现在 VS Code 原生「问题」面板，**原生可点击跳转**；并在编辑器对应行显示波浪线。
+  - 同时打开一个 markdown 摘要编辑器供阅读。
+  - 零新 UI 管线：不新增 EditorPane / React bundle / build.js 入口，不触碰 `getReactAccessor` 的 eager 列表（规避 fix-settings-pane-mount-resilience 那类风险）。仅改 `reviewService.ts` 一个文件。
+- ~~A：自定义 React EditorPane~~ / ~~B：聊天消息~~ —— 相比 C 都更重且无原生跳转优势，未采用。
 
 ## Phase 2（非首版）
 
