@@ -31,6 +31,13 @@ export interface IVoidSCMService {
 	 * @param path Path to the git repository
 	 */
 	gitLog(path: string): Promise<string>
+	/**
+	 * Get the full unified diff (truncated). Used by AI code review.
+	 *
+	 * @param path Path to the git repository
+	 * @param compareRef Optional ref to diff against (e.g. 'HEAD'); omitted = unstaged working changes
+	 */
+	gitDiff(path: string, compareRef?: string): Promise<string>
 }
 
 export const IVoidSCMService = createDecorator<IVoidSCMService>('voidSCMService')

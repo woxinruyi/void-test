@@ -1,11 +1,12 @@
 # 任务：AI 代码审查（/review）
 
-## Phase 1 — SCM diff + feature 名
+## Phase 1 — SCM diff + feature 名 ✅
 
-- [ ] `common/voidSCMTypes.ts`：`IVoidSCMService` 接口增加 `gitDiff(path, compareRef?)`
-- [ ] `electron-main/voidSCMMainService.ts`：实现 `gitDiff` = `git diff --no-color [compareRef]`，按现有 MAX_* 习惯截断
-- [ ] `common/voidSettingsTypes.ts`：`featureNames` 增加 `'Review'`，并核对所有穷举 featureNames 处（设置 UI、modelSelectionOfFeature 初始化）补齐
-- [ ] **编译验证：`npx tsc -p src/tsconfig.json --noEmit` 0 errors**
+- [x] `common/voidSCMTypes.ts`：`IVoidSCMService` 接口增加 `gitDiff(path, compareRef?)`
+- [x] `electron-main/voidSCMMainService.ts`：实现 `gitDiff` = `git diff --no-color [compareRef]`，截断到 `MAX_FULL_DIFF_LENGTH`（60000）
+- [x] `common/voidSettingsTypes.ts`：`featureNames` 增加 `'Review'` + `displayInfoOfFeatureName` 补 'Code Review' 分支
+- [x] 穷举处补齐：`voidSettingsService.ts` 的 `modelFilterOfFeatureName`、`defaultState` 两处字面量、老用户迁移回填（仿 SCM）
+- [x] **编译验证：`npx tsc -p src/tsconfig.json --noEmit` 0 errors**
 
 ## Phase 2 — 审查服务
 

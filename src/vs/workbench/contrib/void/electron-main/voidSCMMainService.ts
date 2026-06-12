@@ -18,6 +18,8 @@ const exec = promisify(_exec)
 //8000 and 10 were chosen after some experimentation on small-to-moderately sized changes
 const MAX_DIFF_LENGTH = 8000
 const MAX_DIFF_FILES = 10
+// full-diff cap for AI code review — larger than the per-file sampled cap above
+const MAX_FULL_DIFF_LENGTH = 60000
 
 const git = async (command: string, path: string): Promise<string> => {
 	const { stdout, stderr } = await exec(`${command}`, { cwd: path })
@@ -70,6 +72,12 @@ export class VoidSCMService implements IVoidSCMService {
 			.slice(0, MAX_DIFF_FILES)
 		const diffs = await Promise.all(topFiles.map(async ({ file }) => ({ file, diff: await getSampledDiff(file, path, useStagedChanges) })))
 		return diffs.map(({ file, diff }) => `==== ${file} ====\n${diff}`).join('\n\n')
+	}
+
+	async gitDiff(path: string, compareRef?: string): Promise<string> {
+		const ref = compareRef ? ` ${compareRef}` : ''
+		const diff = await git(`git diff --no-color${ref}`, path)
+		return diff.slice(0, MAX_FULL_DIFF_LENGTH)
 	}
 
 	gitBranch(path: string): Promise<string> {

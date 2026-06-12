@@ -65,7 +65,43 @@ import { IStorageService, StorageScope, StorageTarget } from '../../../../platfo
 import { IMetricsService } from './metricsService.js';
 import { defaultProviderSettings, getModelCapabilities, ModelOverrides } from './modelCapabilities.js';
 import { VOID_SETTINGS_STORAGE_KEY } from './storageKeys.js';
-import { defaultSettingsOfProvider, FeatureName, ProviderName, ModelSelectionOfFeature, SettingsOfProvider, SettingName, providerNames, ModelSelection, modelSelectionsEqual, featureNames, VoidStatefulModelInfo, GlobalSettings, GlobalSettingName, defaultGlobalSettings, ModelSelectionOptions, OptionsOfModelSelection, ChatMode, OverridesOfModel, defaultOverridesOfModel, MCPUserStateOfName as MCPUserStateOfName, MCPUserState } from './voidSettingsTypes.js';
+import { defaultSettingsOfProvider, FeatureName, ProviderName, ModelSelectionOfFeature, SettingsOfProvider, SettingName, providerNames, ModelSelection, modelSelectionsEqual, featureNames, VoidStatefulModelInfo, GlobalSettings, GlobalSettingName, defaultGlobalSettings, ModelSelectionOptions, OptionsOfModelSelection, ChatMode, OverridesOfModel, defaultOverridesOfModel, MCPUserStateOfName as MCPUserStateOfName, MCPUserState, AutoApproveSettings, DEFAULT_TERMINAL_ALLOWLIST, InstalledSkills, SkillInfo } from './voidSettingsTypes.js';
+
+
+/**
+ * 将持久化 autoApprove 规范化为新结构：把 legacy 键 (edits / terminal / 'MCP tools') 映射到
+ * editsInWorkspace/editsOutsideWorkspace/terminalAny/mcpAll 并清理 legacy 键。
+ * 返回 { value: 规范化后值, migrated: 是否发生迁移 }。
+ */
+export function normalizeAutoApprove(raw: any): { value: AutoApproveSettings; migrated: boolean } {
+	const input: AutoApproveSettings = (raw && typeof raw === 'object') ? { ...raw } : {}
+	let migrated = false
+
+	if (input.edits !== undefined) {
+		const v = !!input.edits
+		if (input.editsInWorkspace === undefined) input.editsInWorkspace = v
+		if (input.editsOutsideWorkspace === undefined) input.editsOutsideWorkspace = v
+		delete input.edits
+		migrated = true
+	}
+	if (input.terminal !== undefined) {
+		if (input.terminalAny === undefined) input.terminalAny = !!input.terminal
+		delete input.terminal
+		migrated = true
+	}
+	if (input['MCP tools'] !== undefined) {
+		if (input.mcpAll === undefined) input.mcpAll = !!input['MCP tools']
+		delete input['MCP tools']
+		migrated = true
+	}
+
+	// 若启用 allowlist 却无 patterns，回填默认列表
+	if (input.terminalAllowlist && !input.terminalAllowlistPatterns) {
+		input.terminalAllowlistPatterns = [...DEFAULT_TERMINAL_ALLOWLIST]
+	}
+
+	return { value: input, migrated }
+}
 
 
 // name is the name in the dropdown
@@ -96,6 +132,7 @@ export type VoidSettingsState = {
 	readonly overridesOfModel: OverridesOfModel;
 	readonly globalSettings: GlobalSettings;
 	readonly mcpUserStateOfName: MCPUserStateOfName; // user-controlled state of MCP servers
+	readonly installedSkills: InstalledSkills; // user-installed agent skills from ModelScope
 
 	readonly _modelOptions: ModelOption[] // computed based on the two above items
 }
@@ -131,10 +168,39 @@ export interface IVoidSettingsService {
 	addMCPUserStateOfNames(userStateOfName: MCPUserStateOfName): Promise<void>;
 	removeMCPUserStateOfNames(serverNames: string[]): Promise<void>;
 	setMCPServerState(serverName: string, state: MCPUserState): Promise<void>;
+
+	// Skill management
+	addSkill(skill: SkillInfo): Promise<void>;
+	removeSkill(skillId: string): Promise<void>;
+	toggleSkillEnabled(skillId: string, enabled: boolean): Promise<void>;
 }
 
 
 
+
+const DEFAULT_CHECKED_PATTERNS = [
+	// 国外 — OpenAI
+	'gpt-4o', 'gpt-4.1', 'gpt-4o-mini',
+	'gpt-5.4', 'gpt-5.4-nano',
+	'o3-mini', 'o4-mini',
+	// 国外 — Anthropic Claude
+	'claude-3.5-sonnet', 'claude-3.7-sonnet', 'claude-sonnet-4',
+	'claude-sonnet-4-6', 'claude-sonnet-4-6-thinking',
+	'claude-haiku-4-5',
+	'claude-opus-4-6', 'claude-opus-4-6-thinking',
+	// 国产
+	'deepseek-chat', 'deepseek-coder', 'deepseek-reasoner',
+	'qwen',
+	'glm-4.6-thinking', 'glm-4.7', 'glm5',
+	'kimi-k2.5',
+	'doubao',
+	'moonshot',
+]
+
+const _isDefaultCheckedModel = (modelName: string): boolean => {
+	const lower = modelName.toLowerCase()
+	return DEFAULT_CHECKED_PATTERNS.some(p => lower.includes(p.toLowerCase()))
+}
 
 const _modelsWithSwappedInNewModels = (options: { existingModels: VoidStatefulModelInfo[], models: string[], type: 'autodetected' | 'default' }) => {
 	const { existingModels, models, type } = options
@@ -144,7 +210,13 @@ const _modelsWithSwappedInNewModels = (options: { existingModels: VoidStatefulMo
 		existingModelsMap[existingModel.modelName] = existingModel
 	}
 
-	const newDefaultModels = models.map((modelName, i) => ({ modelName, type, isHidden: !!existingModelsMap[modelName]?.isHidden, }))
+	const newDefaultModels = models.map((modelName, i) => ({
+		modelName,
+		type,
+		isHidden: existingModelsMap[modelName] !== undefined
+			? !!existingModelsMap[modelName].isHidden
+			: !_isDefaultCheckedModel(modelName),
+	}))
 
 	return [
 		...newDefaultModels, // swap out all the models of this type for the new models of this type
@@ -169,6 +241,7 @@ export const modelFilterOfFeatureName: {
 	'Ctrl+K': { filter: o => true, emptyMessage: null, },
 	'Apply': { filter: o => true, emptyMessage: null, },
 	'SCM': { filter: o => true, emptyMessage: null, },
+	'Review': { filter: o => true, emptyMessage: null, },
 }
 
 
@@ -266,12 +339,13 @@ const _validatedModelState = (state: Omit<VoidSettingsState, '_modelOptions'>): 
 const defaultState = () => {
 	const d: VoidSettingsState = {
 		settingsOfProvider: deepClone(defaultSettingsOfProvider),
-		modelSelectionOfFeature: { 'Chat': null, 'Ctrl+K': null, 'Autocomplete': null, 'Apply': null, 'SCM': null },
+		modelSelectionOfFeature: { 'Chat': null, 'Ctrl+K': null, 'Autocomplete': null, 'Apply': null, 'SCM': null, 'Review': null },
 		globalSettings: deepClone(defaultGlobalSettings),
-		optionsOfModelSelection: { 'Chat': {}, 'Ctrl+K': {}, 'Autocomplete': {}, 'Apply': {}, 'SCM': {} },
+		optionsOfModelSelection: { 'Chat': {}, 'Ctrl+K': {}, 'Autocomplete': {}, 'Apply': {}, 'SCM': {}, 'Review': {} },
 		overridesOfModel: deepClone(defaultOverridesOfModel),
 		_modelOptions: [], // computed later
 		mcpUserStateOfName: {},
+		installedSkills: {},
 	}
 	return d
 }
@@ -334,10 +408,21 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 			// autoapprove is now an obj not a boolean (1.2.5)
 			if (typeof readS.globalSettings.autoApprove === 'boolean') readS.globalSettings.autoApprove = {}
 
+			// 迁移 legacy autoApprove 三键 (edits / terminal / 'MCP tools') 到新结构 (1.4.0)
+			{
+				const { value } = normalizeAutoApprove(readS.globalSettings.autoApprove)
+				readS.globalSettings.autoApprove = value
+			}
+
 			// 1.3.5 add source control feature
 			if (readS.modelSelectionOfFeature && !readS.modelSelectionOfFeature['SCM']) {
 				readS.modelSelectionOfFeature['SCM'] = deepClone(readS.modelSelectionOfFeature['Chat'])
 				readS.optionsOfModelSelection['SCM'] = deepClone(readS.optionsOfModelSelection['Chat'])
+			}
+			// add AI code review feature (backfill from Chat for existing users)
+			if (readS.modelSelectionOfFeature && !readS.modelSelectionOfFeature['Review']) {
+				readS.modelSelectionOfFeature['Review'] = deepClone(readS.modelSelectionOfFeature['Chat'])
+				readS.optionsOfModelSelection['Review'] = deepClone(readS.optionsOfModelSelection['Chat'])
 			}
 			// add disableSystemMessage feature
 			if (readS.globalSettings.disableSystemMessage === undefined) readS.globalSettings.disableSystemMessage = false;
@@ -435,6 +520,8 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 		const newOverridesOfModel = this.state.overridesOfModel
 		const newMCPUserStateOfName = this.state.mcpUserStateOfName
 
+		const newInstalledSkills = this.state.installedSkills ?? {}
+
 		const newState = {
 			modelSelectionOfFeature: newModelSelectionOfFeature,
 			optionsOfModelSelection: newOptionsOfModelSelection,
@@ -442,6 +529,7 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 			globalSettings: newGlobalSettings,
 			overridesOfModel: newOverridesOfModel,
 			mcpUserStateOfName: newMCPUserStateOfName,
+			installedSkills: newInstalledSkills,
 		}
 
 		this.state = _validatedModelState(newState)
@@ -659,6 +747,44 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 		}
 		await this._setMCPUserStateOfName(newMCPServerStates)
 		this._metricsService.capture('Update MCP Server State', { serverName, state });
+	}
+
+	// Skill management
+	private _setInstalledSkills = async (newSkills: InstalledSkills) => {
+		const newState: VoidSettingsState = {
+			...this.state,
+			installedSkills: newSkills,
+		};
+		this.state = _validatedModelState(newState);
+		await this._storeState();
+		this._onDidChangeState.fire();
+	}
+
+	addSkill = async (skill: SkillInfo) => {
+		const newSkills: InstalledSkills = {
+			...this.state.installedSkills,
+			[skill.id]: skill,
+		}
+		await this._setInstalledSkills(newSkills)
+		this._metricsService.capture('Add Skill', { skillId: skill.id, skillName: skill.name });
+	}
+
+	removeSkill = async (skillId: string) => {
+		const newSkills: InstalledSkills = { ...this.state.installedSkills }
+		delete newSkills[skillId]
+		await this._setInstalledSkills(newSkills)
+		this._metricsService.capture('Remove Skill', { skillId });
+	}
+
+	toggleSkillEnabled = async (skillId: string, enabled: boolean) => {
+		const existing = this.state.installedSkills[skillId]
+		if (!existing) return
+		const newSkills: InstalledSkills = {
+			...this.state.installedSkills,
+			[skillId]: { ...existing, enabled },
+		}
+		await this._setInstalledSkills(newSkills)
+		this._metricsService.capture('Toggle Skill', { skillId, enabled });
 	}
 
 }
