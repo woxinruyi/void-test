@@ -98,6 +98,9 @@ import './fileService.js'
 // register source control management
 import './voidSCMService.js'
 
+// register marketplace service (used by settings pane via getReactAccessor)
+import './marketplaceService.js'
+
 // ---------- common (unclear if these actually need to be imported, because they're already imported wherever they're used) ----------
 
 // llmMessage
