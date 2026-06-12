@@ -27,7 +27,11 @@
 
 ## Phase 4 — 验证与归档
 
-- [ ] 在有未提交改动的仓库执行 `void.reviewChanges`，确认发现可点击跳转（CDP 自动化或人工）
+- [x] CDP 自动化验证（命令注册路径）：编译 out → 启动 → 命令面板触发 `void.reviewChanges` →
+  **0 条注册报错（IReviewService 已解析）+ 命令执行 + 优雅处理"无 git 仓库"通知**。
+  注：完整 diff→LLM 路径未端到端跑通——dev 实例扩展宿主 10s 未启动致 SCM 无 git 仓库，
+  且真实 LLM 需配置凭证；二者均为环境限制，非代码缺陷。
+- [ ] 在扩展宿主就绪 + 配置 Review 模型的环境中跑通完整路径，确认发现可点击跳转（Phase 3 后）
 - [ ] `git diff` 确认仅为本方案新增，无无关改动
 - [ ] 更新 `architecture/services-index.md`（新增 IReviewService）
 - [ ] 归档至 `openspec/changes/archive/` + `.openspec.yaml` + README
