@@ -36,10 +36,7 @@ src/vs/workbench/contrib/void/browser/react/src2/**
 claude-code-sourcemap-main/
 VoidSetup-x64-*.exe
 
-# 临时分析文档和脚本
-temp-*
-temp_*
-!文档/temp-*
+# 临时调试脚本
 check-dom.*
 
 # 编译日志和产物
@@ -96,6 +93,3 @@ scripts/probe-out*.json
 scripts/screenshot.png
 # 本地工具配置
 .pilotdeck/
-# AI 分析临时文档
-temp-*.md
-temp-cdp-*.mjs
