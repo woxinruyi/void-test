@@ -31,4 +31,4 @@
 
 - [x] `git diff` 确认改动仅为本方案三处，无无关"顺手改进"（提交 c433a82）
 - [x] 更新 `architecture/services-index.md`：补"注册图可达性"约束 + 更新日志
-- [ ] 移动至 `openspec/changes/archive/` 并补 `.openspec.yaml` 与归档 README（**待人工在应用内视觉验证通过后再做**）
+- [x] 移动至 `openspec/changes/archive/` 并补 `.openspec.yaml` 与归档 README（CDP 验证通过后归档）
