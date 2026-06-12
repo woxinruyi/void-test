@@ -101,6 +101,9 @@ import './voidSCMService.js'
 // register marketplace service (used by settings pane via getReactAccessor)
 import './marketplaceService.js'
 
+// register AI code review (/review)
+import './reviewService.js'
+
 // ---------- common (unclear if these actually need to be imported, because they're already imported wherever they're used) ----------
 
 // llmMessage

@@ -8,13 +8,14 @@
 - [x] 穷举处补齐：`voidSettingsService.ts` 的 `modelFilterOfFeatureName`、`defaultState` 两处字面量、老用户迁移回填（仿 SCM）
 - [x] **编译验证：`npx tsc -p src/tsconfig.json --noEmit` 0 errors**
 
-## Phase 2 — 审查服务
+## Phase 2 — 审查服务 ✅
 
-- [ ] `common/prompt/prompts.ts`：新增 `codeReview_systemMessage` + `codeReview_userMessage(diff, context)`，约束严格 JSON 输出
-- [ ] `browser/reviewService.ts`：镜像 `GenerateCommitMessageService`，实现 `IReviewService.review(compareRef?)`：定位 git 根 → gitDiff →（可选 subagent 取上下文）→ prepareLLMSimpleMessages(featureName:'Review') → sendLLMMessage → 解析 JSON 发现
-- [ ] `registerSingleton(IReviewService, ...)` + 在 `void.contribution.ts` `import './reviewService.js'`（避免孤儿注册，参考 fix-settings-pane-mount-resilience 教训）
-- [ ] 注册命令 `void.reviewChanges`（f1:true）+ SCM 标题栏菜单项
-- [ ] **编译验证：`npx tsc -p src/tsconfig.json --noEmit` 0 errors**
+- [x] `common/prompt/reviewPrompts.ts`（独立新文件，避免改 WIP 密集的 prompts.ts）：`codeReview_systemMessage` + `codeReview_userMessage(diff, context)` + `ReviewFinding` 类型，约束严格 JSON 输出
+- [x] `browser/reviewService.ts`：镜像 `GenerateCommitMessageService`，实现 `IReviewService.reviewChanges(compareRef='HEAD')`：定位 git 根 → gitDiff → prepareLLMSimpleMessages(featureName:'Review') → sendLLMMessage → 解析 JSON → 渲染到 untitled markdown 编辑器 + 通知
+- [x] `registerSingleton(IReviewService, ...)` + `void.contribution.ts` `import './reviewService.js'`（同时补，避免孤儿注册）
+- [x] 注册命令 `void.reviewChanges`（f1:true）+ SCMTitle 菜单项
+- [x] **编译验证：`npx tsc -p src/tsconfig.json --noEmit` 0 errors**
+- [ ] 子代理取上下文（可选增强，暂未做）
 
 ## Phase 3 — 结果视图
 
