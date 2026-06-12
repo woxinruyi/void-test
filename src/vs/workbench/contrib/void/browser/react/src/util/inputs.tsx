@@ -25,6 +25,7 @@ import { extractSearchReplaceBlocks, ExtractedSearchReplaceBlock } from '../../.
 import { IAccessibilitySignalService } from '../../../../../../../platform/accessibilitySignal/browser/accessibilitySignalService.js';
 import { IEditorProgressService } from '../../../../../../../platform/progress/common/progress.js';
 import { detectLanguage } from '../../../../common/helpers/languageHelpers.js';
+import { t } from '../i18n/index.js';
 
 
 // type guard
@@ -830,7 +831,7 @@ export const VoidInputBox2 = forwardRef<HTMLTextAreaElement, InputBox2Props>(fun
 							))} */}
 							<span>{optionText}</span>
 						</div>
-						: <div className='opacity-50'>Enter text to filter...</div>
+						: <div className='opacity-50'>{t('common.enterTextToFilter')}</div>
 					}
 				</div>}
 
@@ -839,7 +840,7 @@ export const VoidInputBox2 = forwardRef<HTMLTextAreaElement, InputBox2Props>(fun
 				<div className='max-h-[400px] w-full max-w-full overflow-y-auto overflow-x-auto'>
 					<div className="w-max min-w-full flex flex-col gap-0 text-nowrap flex-nowrap">
 						{options.length === 0 ?
-							<div className="text-void-fg-3 px-3 py-0.5">No results found</div>
+							<div className="text-void-fg-3 px-3 py-0.5">{t('common.noResultsFound')}</div>
 							: options.map((o, oIdx) => {
 
 								return (
@@ -1975,7 +1976,7 @@ export const VoidDiffEditor = ({ uri, searchReplaceBlocks, language }: { uri?: a
 
 	// If no blocks, show empty state
 	if (blocks.length === 0) {
-		return <div className="w-full p-4 text-void-fg-4 text-sm">No changes found</div>;
+		return <div className="w-full p-4 text-void-fg-4 text-sm">{t('common.noChangesFound')}</div>;
 	}
 
 	// Display all blocks
@@ -1985,7 +1986,7 @@ export const VoidDiffEditor = ({ uri, searchReplaceBlocks, language }: { uri?: a
 				<div key={index} className="w-full">
 					{blocks.length > 1 && (
 						<div className="text-void-fg-4 text-xs mb-1 px-1">
-							Change {index + 1} of {blocks.length}
+							{t('common.changeOf', String(index + 1), String(blocks.length))}
 						</div>
 					)}
 					<SingleDiffEditor block={block} lang={lang} />

@@ -161,7 +161,7 @@ export class LLMMessageService extends Disposable implements ILLMMessageService 
 			return null
 		}
 
-		const { settingsOfProvider, } = this.voidSettingsService.state
+		const { settingsOfProvider, globalSettings } = this.voidSettingsService.state
 
 		const mcpTools = this.mcpService.getMCPTools()
 
@@ -179,6 +179,7 @@ export class LLMMessageService extends Disposable implements ILLMMessageService 
 			settingsOfProvider,
 			modelSelection,
 			mcpTools,
+			promptCaching: globalSettings.anthropicPromptCaching, // add-prompt-caching
 		} satisfies MainSendLLMMessageParams);
 
 		return requestId

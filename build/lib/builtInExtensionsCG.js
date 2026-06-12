@@ -21,6 +21,10 @@ const contentBasePath = 'raw.githubusercontent.com';
 const contentFileNames = ['package.json', 'package-lock.json'];
 async function downloadExtensionDetails(extension) {
     const extensionLabel = `${extension.name}@${extension.version}`;
+    if (!extension.repo) {
+        console.log(`${extensionLabel} ${ansi_colors_1.default.gray('[skip: no repo metadata]')}`);
+        return;
+    }
     const repository = url_1.default.parse(extension.repo).path.substr(1);
     const repositoryContentBaseUrl = `https://${token ? `${token}@` : ''}${contentBasePath}/${repository}/v${extension.version}`;
     async function getContent(fileName) {
@@ -78,4 +82,3 @@ main().then(() => {
     console.error(err);
     process.exit(1);
 });
-//# sourceMappingURL=builtInExtensionsCG.js.map

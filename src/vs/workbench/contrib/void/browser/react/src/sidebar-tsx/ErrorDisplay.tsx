@@ -7,6 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { AlertCircle, ChevronDown, ChevronUp, X } from 'lucide-react';
 import { useSettingsState } from '../util/services.js';
 import { errorDetails } from '../../../../common/sendLLMMessageTypes.js';
+import { t } from '../i18n/index.js';
 
 
 export const ErrorDisplay = ({
@@ -71,7 +72,7 @@ export const ErrorDisplay = ({
 			{isExpanded && details && (
 				<div className='mt-4 space-y-3 border-t border-red-200 pt-3 overflow-auto'>
 					<div>
-						<span className='font-semibold text-red-800'>Full Error: </span>
+						<span className='font-semibold text-red-800'>{t('error.fullError')}</span>
 						<pre className='text-red-700'>{details}</pre>
 					</div>
 				</div>

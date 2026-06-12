@@ -10,11 +10,14 @@ import { useIsDark } from '../util/services.js';
 import '../styles.css'
 import { SidebarChat } from './SidebarChat.js';
 import ErrorBoundary from './ErrorBoundary.js';
+import { useLocale } from '../i18n/index.js';
 
 export const Sidebar = ({ className }: { className: string }) => {
 
+	const [locale] = useLocale()
 	const isDark = useIsDark()
 	return <div
+		key={locale}
 		className={`@@void-scope ${isDark ? 'dark' : ''}`}
 		style={{ width: '100%', height: '100%' }}
 	>

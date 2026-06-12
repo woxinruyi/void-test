@@ -62,6 +62,7 @@ export interface IProductConfiguration {
 	readonly date?: string;
 	readonly quality?: string;
 	readonly commit?: string;
+	readonly defaultLocale?: string;
 
 	readonly nameShort: string;
 	readonly nameLong: string;

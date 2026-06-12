@@ -8,6 +8,7 @@ import { CopyButton, IconShell1 } from '../markdown/ApplyBlockHoverButtons.js';
 import { useAccessor, useChatThreadsState, useChatThreadsStreamState, useFullChatThreadsStreamState, useSettingsState } from '../util/services.js';
 import { IconX } from './SidebarChat.js';
 import { Check, Copy, Icon, LoaderCircle, MessageCircleQuestion, Trash2, UserCheck, X } from 'lucide-react';
+import { t } from '../i18n/index.js';
 import { IsRunningType, ThreadType } from '../../../chatThreadService.js';
 
 
@@ -124,7 +125,7 @@ const DuplicateButton = ({ threadId }: { threadId: string }) => {
 		onClick={() => { chatThreadsService.duplicateThread(threadId); }}
 		data-tooltip-id='void-tooltip'
 		data-tooltip-place='top'
-		data-tooltip-content='Duplicate thread'
+		data-tooltip-content={t('chat.thread.duplicate')}
 	>
 	</IconShell1>
 
@@ -146,7 +147,7 @@ const TrashButton = ({ threadId }: { threadId: string }) => {
 				onClick={() => { setIsTrashPressed(false); }}
 				data-tooltip-id='void-tooltip'
 				data-tooltip-place='top'
-				data-tooltip-content='Cancel'
+				data-tooltip-content={t('chat.thread.cancel')}
 			/>
 			<IconShell1
 				Icon={Check}
@@ -154,7 +155,7 @@ const TrashButton = ({ threadId }: { threadId: string }) => {
 				onClick={() => { chatThreadsService.deleteThread(threadId); setIsTrashPressed(false); }}
 				data-tooltip-id='void-tooltip'
 				data-tooltip-place='top'
-				data-tooltip-content='Confirm'
+				data-tooltip-content={t('chat.thread.confirm')}
 			/>
 		</div>
 		: <IconShell1
@@ -163,7 +164,7 @@ const TrashButton = ({ threadId }: { threadId: string }) => {
 			onClick={() => { setIsTrashPressed(true); }}
 			data-tooltip-id='void-tooltip'
 			data-tooltip-place='top'
-			data-tooltip-content='Delete thread'
+			data-tooltip-content={t('chat.thread.delete')}
 		/>
 	)
 }

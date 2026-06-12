@@ -25,6 +25,8 @@ product.overrides.json
 # Void added these:
 .tmp/
 .tmp2/
+.tmp-packaged-user-data*/
+.tmp-packaged-extensions*/
 .tool-versions
 src/vs/workbench/contrib/void/browser/react/out/**
 src/vs/workbench/contrib/void/browser/react/src2/**
@@ -57,3 +59,43 @@ compile_*.txt
 
 # GitHub workflows (需要特殊权限)
 .github/workflows/
+
+# ===== 本地 scratch / 隐私 / 运行时产物（排除出公开仓库）=====
+# 隐私凭证 — 永不提交
+文档/账号信息.md
+# 营销/下载网页
+send_email.mjs
+email_template.html
+韩文网页/
+# 运行时日志 / 检查点 / 索引
+%LOG%
+*.log
+electron-stderr.log
+isolate-*.log
+.void/checkpoints/
+.void/index/
+.void/tools-debug.log
+# 调试 / 探针 / inspect scratch
+check-*.cjs
+check_refs.mjs
+debug-*.cjs
+debug_*.js
+capture-*.cjs
+inspect-*.cjs
+trigger-*.cjs
+click-*.cjs
+accept-language-pack-install.cjs
+finalize-language-install-flow.cjs
+search_all_cn.mjs
+test-esm.mjs
+hello.md
+/index.js
+scripts/probe*.js
+scripts/probe-out*.txt
+scripts/probe-out*.json
+scripts/screenshot.png
+# 本地工具配置
+.pilotdeck/
+# AI 分析临时文档
+temp-*.md
+temp-cdp-*.mjs

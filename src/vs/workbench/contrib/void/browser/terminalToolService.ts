@@ -38,6 +38,9 @@ export interface ITerminalToolService {
 
 	getPersistentTerminal(terminalId: string): ITerminalInstance | undefined
 	getTemporaryTerminal(terminalId: string): ITerminalInstance | undefined
+
+	/** Phase 2.3: 返回最近一次失败命令的截断输出（用于 system prompt 上下文注入）。无错误返回 null。 */
+	getRecentErrorOutput(): string | null
 }
 export const ITerminalToolService = createDecorator<ITerminalToolService>('TerminalToolService');
 
@@ -70,6 +73,23 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 
 	private persistentTerminalInstanceOfId: Record<string, ITerminalInstance> = {}
 	private temporaryTerminalInstanceOfId: Record<string, ITerminalInstance> = {}
+
+	// Phase 2.3: 缓存最近一次失败命令的输出（最多 10 行 / 800 字符）
+	private _lastErrorOutput: string | null = null
+
+	getRecentErrorOutput(): string | null {
+		return this._lastErrorOutput
+	}
+
+	private _recordIfError(result: string, resolveReason: TerminalResolveReason): void {
+		if (resolveReason.type !== 'done') return
+		if (resolveReason.exitCode === 0) return
+		if (!result || result.trim().length === 0) return
+		// 截取后 10 行 + 800 字符上限
+		const lines = result.trim().split('\n')
+		const tail = lines.slice(-10).join('\n')
+		this._lastErrorOutput = tail.length > 800 ? tail.slice(-800) : tail
+	}
 
 	constructor(
 		@ITerminalService private readonly terminalService: ITerminalService,
@@ -371,6 +391,7 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 					+ result.slice(result.length - half, Infinity)
 			}
 
+			this._recordIfError(result, resolveReason)
 			return { result, resolveReason }
 
 		}

@@ -49,6 +49,7 @@ async function main() {
 	await ensureNodeModules();
 	await getElectron();
 	await ensureCompiled();
+	await runProcess(npm, ['run', 'validate-localization-packaging']);
 
 	// Can't require this until after dependencies are installed
 	const { getBuiltInExtensions } = require('./builtInExtensions');

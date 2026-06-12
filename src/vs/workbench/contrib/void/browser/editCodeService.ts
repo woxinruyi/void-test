@@ -153,6 +153,65 @@ const removeWhitespaceExceptNewlines = (str: string): string => {
 
 
 
+// Normalize a line for fuzzy comparison: collapse whitespace, trim, lowercase
+const normalizeLine = (line: string): string => line.replace(/\s+/g, ' ').trim().toLowerCase()
+
+// Compute similarity ratio between two strings (0..1) using longest common subsequence
+const lineSimilarity = (a: string, b: string): number => {
+	if (a === b) return 1
+	if (a.length === 0 || b.length === 0) return 0
+	// Simple LCS-based ratio (optimized for short strings / single lines)
+	const la = a.length, lb = b.length
+	if (la > 500 || lb > 500) {
+		// For very long lines, fall back to simple check
+		return a.includes(b) || b.includes(a) ? 0.8 : 0
+	}
+	const prev = new Uint16Array(lb + 1)
+	const curr = new Uint16Array(lb + 1)
+	for (let i = 1; i <= la; i++) {
+		curr.fill(0)
+		for (let j = 1; j <= lb; j++) {
+			if (a[i - 1] === b[j - 1]) curr[j] = prev[j - 1] + 1
+			else curr[j] = Math.max(prev[j], curr[j - 1])
+		}
+		prev.set(curr)
+	}
+	const lcsLen = prev[lb]
+	return (2 * lcsLen) / (la + lb)
+}
+
+// Line-level fuzzy matching: find best matching region in file for a block of text
+const fuzzyFindLines = (textLines: string[], fileLines: string[], startLine: number): { startLine: number, endLine: number, score: number } | null => {
+	const searchLen = textLines.length
+	if (searchLen === 0 || fileLines.length === 0) return null
+
+	const normalizedSearch = textLines.map(normalizeLine)
+	const normalizedFile = fileLines.map(normalizeLine)
+
+	let bestScore = -1
+	let bestStart = -1
+	const THRESHOLD = 0.7 // minimum average similarity to accept
+
+	// Sliding window over file lines
+	const searchStart = Math.max(0, startLine - 1) // 0-indexed
+	for (let i = searchStart; i <= normalizedFile.length - searchLen; i++) {
+		let totalSim = 0
+		for (let j = 0; j < searchLen; j++) {
+			totalSim += lineSimilarity(normalizedSearch[j], normalizedFile[i + j])
+		}
+		const avgSim = totalSim / searchLen
+		if (avgSim > bestScore) {
+			bestScore = avgSim
+			bestStart = i
+		}
+	}
+
+	if (bestScore >= THRESHOLD && bestStart >= 0) {
+		return { startLine: bestStart + 1, endLine: bestStart + searchLen, score: bestScore } // 1-indexed
+	}
+	return null
+}
+
 // finds block.orig in fileContents and return its range in file
 // startingAtLine is 1-indexed and inclusive
 // returns 1-indexed lines
@@ -182,15 +241,26 @@ const findTextInCode = (text: string, fileContents: string, canFallbackToRemoveW
 		return 'Not found' as const
 
 	// try to find it ignoring all whitespace this time
-	text = removeWhitespaceExceptNewlines(text)
-	fileContents = removeWhitespaceExceptNewlines(fileContents)
-	idx = fileContents.indexOf(text, startingAtLineIdx(fileContents));
+	const strippedText = removeWhitespaceExceptNewlines(text)
+	const strippedFile = removeWhitespaceExceptNewlines(fileContents)
+	idx = strippedFile.indexOf(strippedText, startingAtLineIdx(strippedFile));
 
-	if (idx === -1) return 'Not found' as const
-	const lastIdx = fileContents.lastIndexOf(text)
-	if (lastIdx !== idx) return 'Not unique' as const
+	if (idx !== -1) {
+		const lastIdx = strippedFile.lastIndexOf(strippedText)
+		if (lastIdx !== idx) return 'Not unique' as const
+		return returnAns(strippedFile, idx)
+	}
 
-	return returnAns(fileContents, idx)
+	// Fallback: line-level fuzzy matching
+	const textLines = text.split('\n')
+	const fileLines = fileContents.split('\n')
+	const startLine = opts?.startingAtLine ?? 1
+	const fuzzyResult = fuzzyFindLines(textLines, fileLines, startLine)
+	if (fuzzyResult) {
+		return [fuzzyResult.startLine, fuzzyResult.endLine] as const
+	}
+
+	return 'Not found' as const
 }
 
 

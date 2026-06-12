@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------*/
 
 import { FeatureName, ModelSelectionOptions, OverridesOfModel, ProviderName } from './voidSettingsTypes.js';
+import type { ReasoningTier } from './helpers/reasoningAuto.js';
 
 
 
@@ -64,6 +65,10 @@ export const defaultProviderSettings = {
 		apiKey: '',
 		region: 'us-east-1', // add region setting
 		endpoint: '', // optionally allow overriding default
+	},
+	aiyiwei: {
+		apiKey: '',
+		endpoint: 'https://aiyiwei.vip',
 	},
 
 } as const
@@ -153,6 +158,14 @@ export const defaultModelsOfProvider = {
 	microsoftAzure: [],
 	awsBedrock: [],
 	liteLLM: [],
+	aiyiwei: [
+		'claude-sonnet-4-6',
+		'claude-opus-4-6',
+		'claude-opus-4-8',
+		'claude-opus-4-7',
+		'claude-haiku-4-5-20251001',
+		'claude-opus-4-1-20250805-thinking',
+	],
 
 
 } as const satisfies Record<ProviderName, string[]>
@@ -1214,8 +1227,15 @@ const ollamaModelOptions = {
 export const ollamaRecommendedModels = ['qwen2.5-coder:1.5b', 'llama3.1', 'qwq', 'deepseek-r1', 'devstral:latest'] as const satisfies (keyof typeof ollamaModelOptions)[]
 
 
+const _forceOAIStyleTools = (res: ReturnType<typeof extensiveModelOptionsFallback>) => {
+	if (res && (res.specialToolFormat === 'anthropic-style' || res.specialToolFormat === 'gemini-style')) {
+		res.specialToolFormat = 'openai-style'
+	}
+	return res
+}
+
 const vLLMSettings: VoidStaticProviderInfo = {
-	modelOptionsFallback: (modelName) => extensiveModelOptionsFallback(modelName, { downloadable: { sizeGb: 'not-known' } }),
+	modelOptionsFallback: (modelName) => _forceOAIStyleTools(extensiveModelOptionsFallback(modelName, { downloadable: { sizeGb: 'not-known' } })),
 	modelOptions: {},
 	providerReasoningIOSettings: {
 		// reasoning: OAICompat + response.choices[0].delta.reasoning_content // https://docs.vllm.ai/en/stable/features/reasoning_outputs.html#streaming-chat-completions
@@ -1225,7 +1245,7 @@ const vLLMSettings: VoidStaticProviderInfo = {
 }
 
 const lmStudioSettings: VoidStaticProviderInfo = {
-	modelOptionsFallback: (modelName) => extensiveModelOptionsFallback(modelName, { downloadable: { sizeGb: 'not-known' }, contextWindow: 4_096 }),
+	modelOptionsFallback: (modelName) => _forceOAIStyleTools(extensiveModelOptionsFallback(modelName, { downloadable: { sizeGb: 'not-known' }, contextWindow: 4_096 })),
 	modelOptions: {},
 	providerReasoningIOSettings: {
 		input: { includeInPayload: openAICompatIncludeInPayloadReasoning },
@@ -1234,7 +1254,7 @@ const lmStudioSettings: VoidStaticProviderInfo = {
 }
 
 const ollamaSettings: VoidStaticProviderInfo = {
-	modelOptionsFallback: (modelName) => extensiveModelOptionsFallback(modelName, { downloadable: { sizeGb: 'not-known' } }),
+	modelOptionsFallback: (modelName) => _forceOAIStyleTools(extensiveModelOptionsFallback(modelName, { downloadable: { sizeGb: 'not-known' } })),
 	modelOptions: ollamaModelOptions,
 	providerReasoningIOSettings: {
 		// reasoning: we need to filter out reasoning <think> tags manually
@@ -1244,7 +1264,7 @@ const ollamaSettings: VoidStaticProviderInfo = {
 }
 
 const openaiCompatible: VoidStaticProviderInfo = {
-	modelOptionsFallback: (modelName) => extensiveModelOptionsFallback(modelName),
+	modelOptionsFallback: (modelName) => _forceOAIStyleTools(extensiveModelOptionsFallback(modelName)),
 	modelOptions: {},
 	providerReasoningIOSettings: {
 		// reasoning: we have no idea what endpoint they used, so we can't consistently parse out reasoning
@@ -1254,7 +1274,7 @@ const openaiCompatible: VoidStaticProviderInfo = {
 }
 
 const liteLLMSettings: VoidStaticProviderInfo = { // https://docs.litellm.ai/docs/reasoning_content
-	modelOptionsFallback: (modelName) => extensiveModelOptionsFallback(modelName, { downloadable: { sizeGb: 'not-known' } }),
+	modelOptionsFallback: (modelName) => _forceOAIStyleTools(extensiveModelOptionsFallback(modelName, { downloadable: { sizeGb: 'not-known' } })),
 	modelOptions: {},
 	providerReasoningIOSettings: {
 		input: { includeInPayload: openAICompatIncludeInPayloadReasoning },
@@ -1411,14 +1431,7 @@ const openRouterModelOptions_assumingOpenAICompat = {
 
 const openRouterSettings: VoidStaticProviderInfo = {
 	modelOptions: openRouterModelOptions_assumingOpenAICompat,
-	modelOptionsFallback: (modelName) => {
-		const res = extensiveModelOptionsFallback(modelName)
-		// openRouter does not support gemini-style, use openai-style instead
-		if (res?.specialToolFormat === 'gemini-style') {
-			res.specialToolFormat = 'openai-style'
-		}
-		return res
-	},
+	modelOptionsFallback: (modelName) => _forceOAIStyleTools(extensiveModelOptionsFallback(modelName)),
 	providerReasoningIOSettings: {
 		// reasoning: OAICompat + response.choices[0].delta.reasoning : payload should have {include_reasoning: true} https://openrouter.ai/announcements/reasoning-tokens-for-thinking-models
 		input: {
@@ -1449,6 +1462,130 @@ const openRouterSettings: VoidStaticProviderInfo = {
 
 
 
+// ---------------- AIYIWEI (aggregated AI provider) ----------------
+const aiyiweiModelOptions = {
+	'claude-sonnet-4-6': {
+		contextWindow: 200_000,
+		reservedOutputTokenSpace: 8_192,
+		cost: { input: 3.00, output: 6.00 },
+		downloadable: false,
+		supportsFIM: false,
+		specialToolFormat: 'openai-style' as const,
+		supportsSystemMessage: 'system-role' as const,
+		reasoningCapabilities: {
+			supportsReasoning: true,
+			canTurnOffReasoning: true,
+			canIOReasoning: true,
+			reasoningReservedOutputTokenSpace: 8192,
+			reasoningSlider: { type: 'budget_slider' as const, min: 1024, max: 8192, default: 1024 },
+		},
+	},
+	'claude-opus-4-6': {
+		contextWindow: 200_000,
+		reservedOutputTokenSpace: 8_192,
+		cost: { input: 15.00, output: 30.00 },
+		downloadable: false,
+		supportsFIM: false,
+		specialToolFormat: 'openai-style' as const,
+		supportsSystemMessage: 'system-role' as const,
+		reasoningCapabilities: {
+			supportsReasoning: true,
+			canTurnOffReasoning: true,
+			canIOReasoning: true,
+			reasoningReservedOutputTokenSpace: 8192,
+			reasoningSlider: { type: 'budget_slider' as const, min: 1024, max: 8192, default: 1024 },
+		},
+	},
+	'claude-opus-4-8': {
+		contextWindow: 200_000,
+		reservedOutputTokenSpace: 8_192,
+		cost: { input: 5.00, output: 25.00 },
+		downloadable: false,
+		supportsFIM: false,
+		specialToolFormat: 'openai-style' as const,
+		supportsSystemMessage: 'system-role' as const,
+		reasoningCapabilities: {
+			supportsReasoning: true,
+			canTurnOffReasoning: true,
+			canIOReasoning: true,
+			reasoningReservedOutputTokenSpace: 8192,
+			reasoningSlider: { type: 'budget_slider' as const, min: 1024, max: 8192, default: 1024 },
+		},
+	},
+	'claude-opus-4-7': {
+		contextWindow: 200_000,
+		reservedOutputTokenSpace: 8_192,
+		cost: { input: 5.00, output: 25.00 },
+		downloadable: false,
+		supportsFIM: false,
+		specialToolFormat: 'openai-style' as const,
+		supportsSystemMessage: 'system-role' as const,
+		reasoningCapabilities: {
+			supportsReasoning: true,
+			canTurnOffReasoning: true,
+			canIOReasoning: true,
+			reasoningReservedOutputTokenSpace: 8192,
+			reasoningSlider: { type: 'budget_slider' as const, min: 1024, max: 8192, default: 1024 },
+		},
+	},
+	'claude-haiku-4-5-20251001': {
+		contextWindow: 200_000,
+		reservedOutputTokenSpace: 8_192,
+		cost: { input: 0.80, output: 4.00 },
+		downloadable: false,
+		supportsFIM: false,
+		specialToolFormat: 'openai-style' as const,
+		supportsSystemMessage: 'system-role' as const,
+		reasoningCapabilities: false,
+	},
+	'claude-opus-4-1-20250805-thinking': {
+		contextWindow: 200_000,
+		reservedOutputTokenSpace: 16_384,
+		cost: { input: 15.00, output: 30.00 },
+		downloadable: false,
+		supportsFIM: false,
+		specialToolFormat: 'openai-style' as const,
+		supportsSystemMessage: 'system-role' as const,
+		reasoningCapabilities: {
+			supportsReasoning: true,
+			canTurnOffReasoning: false,
+			canIOReasoning: true,
+			reasoningReservedOutputTokenSpace: 16384,
+			reasoningSlider: { type: 'budget_slider' as const, min: 1024, max: 16384, default: 4096 },
+		},
+	},
+} as const satisfies Record<string, VoidStaticModelInfo>
+
+const aiyiweiSettings: VoidStaticProviderInfo = {
+	modelOptionsFallback: (modelName) => {
+		const res = extensiveModelOptionsFallback(modelName)
+		if (res) {
+			// aiyiwei is OAI-compatible, force openai-style tool format
+			if (!res.specialToolFormat || res.specialToolFormat === 'anthropic-style' || res.specialToolFormat === 'gemini-style') {
+				res.specialToolFormat = 'openai-style'
+			}
+			return res
+		}
+		// Unknown model: return a safe default with openai-style tools
+		return {
+			modelName,
+			recognizedModelName: modelName,
+			contextWindow: 128_000,
+			reservedOutputTokenSpace: 4_096,
+			cost: { input: 0, output: 0 },
+			downloadable: false,
+			supportsSystemMessage: 'system-role' as const,
+			specialToolFormat: 'openai-style' as const,
+			supportsFIM: false,
+			reasoningCapabilities: false,
+		}
+	},
+	modelOptions: aiyiweiModelOptions,
+	providerReasoningIOSettings: {
+		input: { includeInPayload: openAICompatIncludeInPayloadReasoning },
+	},
+}
+
 // ---------------- model settings of everything above ----------------
 
 const modelSettingsOfProvider: { [providerName in ProviderName]: VoidStaticProviderInfo } = {
@@ -1474,6 +1611,7 @@ const modelSettingsOfProvider: { [providerName in ProviderName]: VoidStaticProvi
 	googleVertex: googleVertexSettings,
 	microsoftAzure: microsoftAzureSettings,
 	awsBedrock: awsBedrockSettings,
+	aiyiwei: aiyiweiSettings,
 } as const
 
 
@@ -1580,6 +1718,63 @@ export const getSendableReasoningInfo = (
 	const reasoningEffort = reasoningBudgetSlider?.type === 'effort_slider' ? modelSelectionOptions?.reasoningEffort ?? reasoningBudgetSlider?.default : undefined
 	if (reasoningEffort) {
 		return { type: 'effort_slider_value', isReasoningEnabled: isReasoningEnabled, reasoningEffort: reasoningEffort }
+	}
+
+	return null
+}
+
+
+// ====================== 推理档位映射（P0-2: reasoning-budget-auto） ======================
+
+/**
+ * 将统一档位抽象 `ReasoningTier` 映射到具体模型的 SendableReasoningInfo。
+ * 档位映射规则：
+ *   - budget_slider:  default→slider.default, high→min(default*3, max*0.6), max→slider.max
+ *   - effort_slider:  default→values[0], high→values[min(1, len-1)], max→values[len-1]
+ *   - off:            若支持关闭则返回 null（不发送 reasoning）；否则回退 default
+ */
+export const tierToSendableReasoning = (
+	tier: ReasoningTier,
+	providerName: ProviderName,
+	modelName: string,
+	overridesOfModel: OverridesOfModel | undefined,
+): SendableReasoningInfo => {
+	const caps = getModelCapabilities(providerName, modelName, overridesOfModel)
+	const rc = caps.reasoningCapabilities
+	if (!rc || !rc.supportsReasoning) return null
+	const slider = rc.reasoningSlider
+	if (!slider) return null
+
+	// off 档：可关则返回 null；不可关则退到 default
+	if (tier === 'off') {
+		if (rc.canTurnOffReasoning) return null
+		tier = 'default'
+	}
+
+	if (slider.type === 'budget_slider') {
+		let budget: number
+		switch (tier) {
+			case 'default': budget = slider.default; break
+			case 'high': budget = Math.min(slider.default * 3, Math.floor(slider.max * 0.6)); break
+			case 'max': budget = slider.max; break
+			default: budget = slider.default
+		}
+		// 保护：不超过 max、不低于 min
+		budget = Math.max(slider.min, Math.min(slider.max, budget))
+		return { type: 'budget_slider_value', isReasoningEnabled: true, reasoningBudget: budget }
+	}
+
+	if (slider.type === 'effort_slider') {
+		const vals = slider.values
+		let idx: number
+		switch (tier) {
+			case 'default': idx = 0; break
+			case 'high': idx = Math.min(1, vals.length - 1); break
+			case 'max': idx = vals.length - 1; break
+			default: idx = vals.indexOf(slider.default)
+		}
+		if (idx < 0) idx = 0
+		return { type: 'effort_slider_value', isReasoningEnabled: true, reasoningEffort: vals[idx] }
 	}
 
 	return null

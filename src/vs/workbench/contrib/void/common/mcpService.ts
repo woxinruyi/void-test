@@ -44,8 +44,18 @@ export const IMCPService = createDecorator<IMCPService>('mcpConfigService');
 
 
 const MCP_CONFIG_FILE_NAME = 'mcp.json';
-const MCP_CONFIG_SAMPLE = { mcpServers: {} }
-const MCP_CONFIG_SAMPLE_STRING = JSON.stringify(MCP_CONFIG_SAMPLE, null, 2);
+const MCP_CONFIG_SAMPLE = {
+	mcpServers: {
+		'modelscope-mcp-server': {
+			command: 'uvx',
+			args: ['modelscope-mcp-server'],
+			env: {
+				MODELSCOPE_API_TOKEN: 'your-api-token'
+			}
+		}
+	}
+};
+const MCP_CONFIG_SAMPLE_STRING = JSON.stringify(MCP_CONFIG_SAMPLE, null, 2) + '\n';
 
 
 // export interface MCPCallToolOfToolName {

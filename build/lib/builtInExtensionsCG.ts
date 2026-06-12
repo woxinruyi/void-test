@@ -21,6 +21,10 @@ const contentFileNames = ['package.json', 'package-lock.json'];
 
 async function downloadExtensionDetails(extension: IExtensionDefinition): Promise<void> {
 	const extensionLabel = `${extension.name}@${extension.version}`;
+	if (!extension.repo) {
+		console.log(`${extensionLabel} ${ansiColors.gray('[skip: no repo metadata]')}`);
+		return;
+	}
 	const repository = url.parse(extension.repo).path!.substr(1);
 	const repositoryContentBaseUrl = `https://${token ? `${token}@` : ''}${contentBasePath}/${repository}/v${extension.version}`;
 

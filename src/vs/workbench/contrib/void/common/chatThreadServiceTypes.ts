@@ -53,6 +53,7 @@ export type ChatMessage =
 		content: string; // content displayed to the LLM on future calls - allowed to be '', will be replaced with (empty)
 		displayContent: string; // content displayed to user  - allowed to be '', will be ignored
 		selections: StagingSelectionItem[] | null; // the user's selection
+		turnId?: string; // turn checkpoint ID for revert
 		state: {
 			stagingSelections: StagingSelectionItem[];
 			isBeingEdited: boolean;

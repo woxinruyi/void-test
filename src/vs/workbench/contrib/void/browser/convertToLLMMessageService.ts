@@ -18,6 +18,10 @@ import { URI } from '../../../../base/common/uri.js';
 import { EndOfLinePreference } from '../../../../editor/common/model.js';
 import { ToolName } from '../common/toolsServiceTypes.js';
 import { IMCPService } from '../common/mcpService.js';
+import { IPlanningService } from './planningService.js';
+import { IMemoryService } from './memoryService.js';
+import { IIDEActivityService } from './ideActivityService.js';
+import { IVoidSCMService } from '../common/voidSCMTypes.js';
 
 export const EMPTY_MESSAGE = '(empty message)'
 
@@ -81,17 +85,23 @@ const prepareMessages_openai_tools = (messages: SimpleLLMMessage[]): AnthropicOr
 			continue
 		}
 
-		// edit previous assistant message to have called the tool
-		const prevMsg = 0 <= i - 1 && i - 1 <= newMessages.length ? newMessages[i - 1] : undefined
-		if (prevMsg?.role === 'assistant') {
-			prevMsg.tool_calls = [{
+		// edit the most recent assistant message to have called the tool
+		// (look backwards past other tool messages for parallel tool call support)
+		let assistantMsg: OpenAILLMChatMessage | undefined
+		for (let j = newMessages.length - 1; j >= 0; j--) {
+			if (newMessages[j].role === 'assistant') { assistantMsg = newMessages[j]; break }
+			if (newMessages[j].role !== 'tool') break
+		}
+		if (assistantMsg?.role === 'assistant') {
+			if (!assistantMsg.tool_calls) assistantMsg.tool_calls = []
+			assistantMsg.tool_calls.push({
 				type: 'function',
 				id: currMsg.id,
 				function: {
 					name: currMsg.name,
 					arguments: JSON.stringify(currMsg.rawParams)
 				}
-			}]
+			})
 		}
 
 		// add the tool
@@ -172,13 +182,19 @@ const prepareMessages_anthropic_tools = (messages: SimpleLLMMessage[], supportsA
 		}
 
 		if (currMsg.role === 'tool') {
-			// add anthropic tools
-			const prevMsg = 0 <= i - 1 && i - 1 <= newMessages.length ? newMessages[i - 1] : undefined
+			// add anthropic tools - look backwards past tool_result user messages for parallel support
+			let assistantMsg: AnthropicLLMChatMessage | undefined
+			for (let j = newMessages.length - 1; j >= 0; j--) {
+				const msg = newMessages[j] as AnthropicLLMChatMessage
+				if (msg.role === 'assistant') { assistantMsg = msg; break }
+				if (msg.role === 'user' && Array.isArray(msg.content) && msg.content.some((c: any) => c.type === 'tool_result')) continue
+				break
+			}
 
 			// make it so the assistant called the tool
-			if (prevMsg?.role === 'assistant') {
-				if (typeof prevMsg.content === 'string') prevMsg.content = [{ type: 'text', text: prevMsg.content }]
-				prevMsg.content.push({ type: 'tool_use', id: currMsg.id, name: currMsg.name, input: currMsg.rawParams })
+			if (assistantMsg?.role === 'assistant') {
+				if (typeof assistantMsg.content === 'string') assistantMsg.content = [{ type: 'text', text: assistantMsg.content }]
+				assistantMsg.content.push({ type: 'tool_use', id: currMsg.id, name: currMsg.name, input: currMsg.rawParams })
 			}
 
 			// turn each tool into a user message with tool results at the end
@@ -445,6 +461,8 @@ const prepareOpenAIOrAnthropicMessages = ({
 type GeminiUserPart = (GeminiLLMChatMessage & { role: 'user' })['parts'][0]
 type GeminiModelPart = (GeminiLLMChatMessage & { role: 'model' })['parts'][0]
 const prepareGeminiMessages = (messages: AnthropicLLMChatMessage[]) => {
+	// Track tool names by ID for parallel tool call support
+	const toolNameById: Map<string, ToolName> = new Map()
 	let latestToolName: ToolName | undefined = undefined
 	const messages2: GeminiLLMChatMessage[] = messages.map((m): GeminiLLMChatMessage | null => {
 		if (m.role === 'assistant') {
@@ -458,6 +476,7 @@ const prepareGeminiMessages = (messages: AnthropicLLMChatMessage[]) => {
 					}
 					else if (c.type === 'tool_use') {
 						latestToolName = c.name
+						toolNameById.set(c.id, c.name)
 						return { functionCall: { id: c.id, name: c.name, args: c.input } }
 					}
 					else return null
@@ -475,8 +494,9 @@ const prepareGeminiMessages = (messages: AnthropicLLMChatMessage[]) => {
 						return { text: c.text }
 					}
 					else if (c.type === 'tool_result') {
-						if (!latestToolName) return null
-						return { functionResponse: { id: c.tool_use_id, name: latestToolName, response: { output: c.content } } }
+						const toolName = toolNameById.get(c.tool_use_id) ?? latestToolName
+						if (!toolName) return null
+						return { functionResponse: { id: c.tool_use_id, name: toolName, response: { output: c.content } } }
 					}
 					else return null
 				}).filter(m => !!m)
@@ -541,6 +561,10 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 		@IVoidSettingsService private readonly voidSettingsService: IVoidSettingsService,
 		@IVoidModelService private readonly voidModelService: IVoidModelService,
 		@IMCPService private readonly mcpService: IMCPService,
+		@IPlanningService private readonly planningService: IPlanningService,
+		@IMemoryService private readonly memoryService: IMemoryService,
+		@IIDEActivityService private readonly ideActivityService: IIDEActivityService,
+		@IVoidSCMService private readonly voidSCMService: IVoidSCMService,
 	) {
 		super()
 	}
@@ -590,10 +614,131 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 
 		const includeXMLToolDefinitions = !specialToolFormat
 
+		// [VOID-TOOLS-DEBUG] Log system message generation parameters (renderer process → DevTools console)
+		console.log(`[VOID-TOOLS-DEBUG] SYSTEM_MSG | chatMode=${chatMode} specialToolFormat=${specialToolFormat ?? 'undefined'} includeXMLToolDefinitions=${includeXMLToolDefinitions}`)
+
 		const mcpTools = this.mcpService.getMCPTools()
 
+		// Gather recently modified (dirty) files for active context
+		const recentlyModifiedFiles: string[] = []
+		try {
+			const allModels = this.modelService.getModels()
+			for (const model of allModels) {
+				// Only include workspace files that have been modified (dirty)
+				if (model.uri.scheme === 'file' && !model.isDisposed()) {
+					const isDirty = model.isAttachedToEditor() && model.getAlternativeVersionId() !== model.getVersionId()
+					if (isDirty) {
+						recentlyModifiedFiles.push(model.uri.fsPath)
+					}
+				}
+			}
+		} catch { /* ignore errors gathering modified files */ }
+
 		const persistentTerminalIDs = this.terminalToolService.listPersistentTerminalIds()
-		const systemMessage = chat_systemMessage({ workspaceFolders, openedURIs, directoryStr, activeURI, persistentTerminalIDs, chatMode, mcpTools, includeXMLToolDefinitions })
+
+		// Build current plan summary for context injection
+		let currentPlanSummary: string | undefined
+		try {
+			const plan = this.planningService.currentPlan
+			if (plan && plan.todos.length > 0) {
+				const statusIcon = (s: string) => s === 'completed' ? '✅' : s === 'in_progress' ? '🔄' : '⬚'
+				const lines = plan.todos.map((t, i) => `${i + 1}. ${statusIcon(t.status)} [${t.priority}] ${t.content}`)
+				const completed = plan.todos.filter(t => t.status === 'completed').length
+				currentPlanSummary = `${plan.title} (${completed}/${plan.todos.length} done)\n${lines.join('\n')}`
+			}
+		} catch { /* ignore */ }
+
+		// Build IDE activity summary for real-time awareness
+		let ideActivitySummary: string | undefined
+		try {
+			const summary = this.ideActivityService.getActivitySummary()
+			if (summary) {
+				ideActivitySummary = summary
+			}
+		} catch { /* ignore */ }
+
+		// Build memories summary for context injection
+		let memoriesSummary: string | undefined
+		try {
+			const memories = this.memoryService.memories
+			if (memories.length > 0) {
+				const memLines = memories.map(m => {
+					const tagsStr = m.tags.length > 0 ? ` [${m.tags.join(', ')}]` : ''
+					return `- (id: ${m.id})${tagsStr} ${m.content}`
+				})
+				memoriesSummary = memLines.join('\n')
+			}
+		} catch { /* ignore */ }
+
+		// Build installed skills list for agent skill injection
+		let installedSkills: import('../common/voidSettingsTypes.js').SkillInfo[] | undefined
+		try {
+			const skills = this.voidSettingsService.state.installedSkills
+			if (skills) {
+				const enabledSkills = Object.values(skills).filter((s): s is import('../common/voidSettingsTypes.js').SkillInfo => !!s && s.enabled)
+				if (enabledSkills.length > 0) {
+					installedSkills = enabledSkills
+				}
+			}
+		} catch { /* ignore */ }
+
+		// Phase 2: Git status summary
+		let gitStatusSummary: string | undefined
+		try {
+			const wsPath = workspaceFolders[0]
+			if (wsPath && (chatMode === 'agent' || chatMode === 'gather')) {
+				const stat = await Promise.race([
+					this.voidSCMService.gitStat(wsPath),
+					new Promise<string>((_, rej) => setTimeout(() => rej('timeout'), 500))
+				])
+				if (stat && stat.trim().length > 0) {
+					// Limit to 30 lines
+					const lines = stat.trim().split('\n')
+					gitStatusSummary = lines.slice(0, 30).join('\n')
+					if (lines.length > 30) gitStatusSummary += `\n... (${lines.length - 30} more files)`
+				}
+			}
+		} catch { /* timeout or no git, skip */ }
+
+		// Phase 2: Project stack summary from package.json
+		let projectStackSummary: string | undefined
+		try {
+			const wsPath = workspaceFolders[0]
+			if (wsPath && (chatMode === 'agent' || chatMode === 'gather')) {
+				const pkgUri = URI.joinPath(URI.file(wsPath), 'package.json')
+				const { model } = this.voidModelService.getModel(pkgUri)
+				if (model) {
+					const pkgContent = model.getValue(EndOfLinePreference.LF)
+					const pkg = JSON.parse(pkgContent)
+					const parts: string[] = []
+					if (pkg.name) parts.push(`Project: ${pkg.name}`)
+					if (pkg.scripts) {
+						const scriptNames = Object.keys(pkg.scripts).slice(0, 8)
+						parts.push(`Scripts: ${scriptNames.join(', ')}`)
+					}
+					if (pkg.dependencies) {
+						const depNames = Object.keys(pkg.dependencies).slice(0, 10)
+						parts.push(`Dependencies: ${depNames.join(', ')}${Object.keys(pkg.dependencies).length > 10 ? '...' : ''}`)
+					}
+					if (pkg.devDependencies) {
+						const devDepNames = Object.keys(pkg.devDependencies).slice(0, 5)
+						parts.push(`DevDeps: ${devDepNames.join(', ')}${Object.keys(pkg.devDependencies).length > 5 ? '...' : ''}`)
+					}
+					if (parts.length > 0) projectStackSummary = parts.join('\n')
+				}
+			}
+		} catch { /* no package.json or parse error, skip */ }
+
+		// Phase 2.3: Recent terminal command error summary
+		let recentErrorsSummary: string | undefined
+		try {
+			if (chatMode === 'agent') {
+				const err = this.terminalToolService.getRecentErrorOutput()
+				if (err && err.trim().length > 0) recentErrorsSummary = err
+			}
+		} catch { /* ignore */ }
+
+		const systemMessage = chat_systemMessage({ workspaceFolders, openedURIs, directoryStr, activeURI, persistentTerminalIDs, chatMode, mcpTools, includeXMLToolDefinitions, recentlyModifiedFiles, currentPlanSummary, memoriesSummary, ideActivitySummary, installedSkills, gitStatusSummary, projectStackSummary, recentErrorsSummary })
 		return systemMessage
 	}
 

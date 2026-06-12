@@ -7,6 +7,7 @@ import '../styles.css'
 import { Tooltip } from 'react-tooltip';
 import 'react-tooltip/dist/react-tooltip.css';
 import { useIsDark } from '../util/services.js';
+import { t } from '../i18n/index.js';
 
 /**
  * Creates a configured global tooltip component with consistent styling
@@ -110,18 +111,18 @@ export const VoidTooltip = () => {
 			>
 				<div style={{ padding: '8px 10px' }}>
 					<div style={{ opacity: 0.8, textAlign: 'center', fontWeight: 'bold', marginBottom: 8 }}>
-						Good starter models
+						{t('tooltip.goodStarterModels')}
 					</div>
 					<div style={{ marginBottom: 4 }}>
-						<span style={{ opacity: 0.8 }}>For chat:{` `}</span>
+						<span style={{ opacity: 0.8 }}>{t('tooltip.forChat')}{` `}</span>
 						<span style={{ opacity: 0.8, fontWeight: 'bold' }}>gemma3</span>
 					</div>
 					<div style={{ marginBottom: 4 }}>
-						<span style={{ opacity: 0.8 }}>For autocomplete:{` `}</span>
+						<span style={{ opacity: 0.8 }}>{t('tooltip.forAutocomplete')}{` `}</span>
 						<span style={{ opacity: 0.8, fontWeight: 'bold' }}>qwen2.5-coder</span>
 					</div>
 					<div style={{ marginBottom: 0 }}>
-						<span style={{ opacity: 0.8 }}>Use the largest version of these you can!</span>
+						<span style={{ opacity: 0.8 }}>{t('tooltip.useLargest')}</span>
 					</div>
 				</div>
 			</Tooltip>

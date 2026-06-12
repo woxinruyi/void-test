@@ -1,18 +1,19 @@
 /*--------------------------------------------------------------------------------------
  *  Copyright 2025 Glass Devtools, Inc. All rights reserved.
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
- *--------------------------------------------------------------------------------------*/
+  *--------------------------------------------------------------------------------------*/
 
-import { useEffect, useRef, useState } from 'react';
-import { useAccessor, useIsDark, useSettingsState } from '../util/services.js';
-import { Brain, Check, ChevronRight, DollarSign, ExternalLink, Globe, Lock, X } from 'lucide-react';
-import { displayInfoOfProviderName, ProviderName, providerNames, localProviderNames, featureNames, FeatureName, isFeatureNameDisabled } from '../../../../common/voidSettingsTypes.js';
-import { ChatMarkdownRender } from '../markdown/ChatMarkdownRender.js';
+ import { useCallback, useEffect, useRef, useState } from 'react';
+import { useAccessor, useIsDark, useSettingsState, useRefreshModelState } from '../util/services.js';
+ import { Brain, Check, ChevronRight, DollarSign, ExternalLink, Globe, Lock, X, Loader2, Wifi, WifiOff } from 'lucide-react';
+ import { displayInfoOfProviderName, ProviderName, providerNames, localProviderNames, featureNames, FeatureName, isFeatureNameDisabled, RefreshableProviderName } from '../../../../common/voidSettingsTypes.js';
+ import { ChatMarkdownRender } from '../markdown/ChatMarkdownRender.js';
 import { OllamaSetupInstructions, OneClickSwitchButton, SettingsForProvider, ModelDump } from '../void-settings-tsx/Settings.js';
 import { ColorScheme } from '../../../../../../../platform/theme/common/theme.js';
 import ErrorBoundary from '../sidebar-tsx/ErrorBoundary.js';
 import { isLinux } from '../../../../../../../base/common/platform.js';
-import { t, useLocale, getSupportedLocales, SupportedLocale } from '../i18n/index.js';
+import { t, useLocale, getLocale, getSupportedLocales } from '../i18n/index.js';
+import { applyGlobalLocale } from '../util/locale.js';
 
 const OVERRIDE_VALUE = false
 
@@ -23,24 +24,26 @@ export const VoidOnboarding = () => {
 
 	const isDark = useIsDark()
 
+	// Onboarding 完成后直接 return null，彻底从 DOM 移除 overlay。
+	// 原因：Chromium 的 `-webkit-app-region` hit-test 不受 pointer-events 影响，
+	// 即使设了 pointer-events:none，appRegion:none 的元素仍会阻断底层 drag 区域。
+	// 只有从 DOM 移除，.titlebar-drag-region 的 appRegion:drag 才能被 hit-test 命中。
+	if (isOnboardingComplete) {
+		return null
+	}
+
 	return (
 		<div className={`@@void-scope ${isDark ? 'dark' : ''}`}>
-			{/* Top drag region — enables window dragging over the onboarding overlay */}
-			{!isOnboardingComplete && (
-				<>
-					<div
-						className="fixed top-9 left-0 right-0 h-9 z-[100000]"
-						style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
-					/>
-					<LanguageSelector />
-				</>
-			)}
+			{/* overlay 从 top:30px 开始，不覆盖标题栏区域。
+				标题栏约 30px 高，原生 -webkit-app-region:drag 在标题栏中生效。
+				Chromium 的 app-region hit-test 不受 pointer-events 影响，
+				只有不覆盖标题栏，才能保证原生 drag 可达。 */}
 			<div
 				className={`
-					bg-void-bg-3 fixed top-0 right-0 bottom-0 left-0 width-full z-[99999]
-					transition-all duration-1000 ${isOnboardingComplete ? 'opacity-0 pointer-events-none' : 'opacity-100 pointer-events-auto'}
+					bg-void-bg-3 fixed right-0 bottom-0 left-0 width-full z-[99999]
+					opacity-100 pointer-events-auto
 				`}
-				style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+				style={{ top: '30px', height: 'calc(100vh - 30px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
 			>
 				<ErrorBoundary>
 					<VoidOnboardingContent />
@@ -106,32 +109,26 @@ const FadeIn = ({ children, className, delayMs = 0, durationMs, ...props }: { ch
 //  New AddProvidersPage Component and helpers
 // =============================================
 
-const tabNameKeys = ['free', 'paid', 'local'] as const;
-type TabNameKey = typeof tabNameKeys[number] | 'cloudOther';
+const tabNameKeys = ['default', 'local', 'compatible'] as const;
+type TabNameKey = typeof tabNameKeys[number];
 
 const tabKeyToI18n: Record<TabNameKey, keyof import('../i18n/types.js').TranslationKeys> = {
-	free: 'onboarding.free',
-	paid: 'onboarding.paid',
+	default: 'onboarding.default',
 	local: 'onboarding.local',
-	cloudOther: 'onboarding.cloudOther',
+	compatible: 'onboarding.compatible',
 };
 
-// Data for cloud providers tab
-const cloudProviders: ProviderName[] = ['googleVertex', 'liteLLM', 'microsoftAzure', 'awsBedrock', 'openAICompatible'];
-
-// Data structures for provider tabs
+// Data structures for provider tabs — only 3 tabs
 const providerNamesOfTab: Record<TabNameKey, ProviderName[]> = {
-	free: ['gemini', 'openRouter'],
+	default: ['aiyiwei'],
 	local: localProviderNames,
-	paid: providerNames.filter(pn => !(['gemini', 'openRouter', ...localProviderNames, ...cloudProviders] as string[]).includes(pn)) as ProviderName[],
-	cloudOther: cloudProviders,
+	compatible: ['openAICompatible'],
 };
 
 const descKeyOfTab: Record<TabNameKey, keyof import('../i18n/types.js').TranslationKeys> = {
-	free: 'onboarding.freeDesc',
-	paid: 'onboarding.paidDesc',
+	default: 'onboarding.defaultDesc',
 	local: 'onboarding.localDesc',
-	cloudOther: 'onboarding.cloudOtherDesc',
+	compatible: 'onboarding.compatibleDesc',
 };
 
 
@@ -148,9 +145,7 @@ const LanguageSelector = () => {
 	const locales = getSupportedLocales();
 
 	return (
-		<div className="fixed top-10 right-4 flex items-center gap-2 z-[100000]"
-			style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-		>
+		<div className="flex items-center gap-2">
 			<Globe className="w-4 h-4 text-void-fg-3 opacity-60" />
 			<div className="flex rounded-md overflow-hidden border border-void-border-2">
 				{locales.map(l => (
@@ -171,8 +166,87 @@ const LanguageSelector = () => {
 	);
 };
 
+// Fetch models button for refreshable providers (aiyiwei, etc.)
+const FetchModelsButton = ({ providerName }: { providerName: RefreshableProviderName }) => {
+	const accessor = useAccessor();
+	const refreshModelService = accessor.get('IRefreshModelService');
+	const refreshState = useRefreshModelState();
+	const state = refreshState[providerName];
+	const isRefreshing = state?.state === 'refreshing';
+
+	const [statusMsg, setStatusMsg] = useState<string | null>(null);
+
+	const handleFetch = useCallback(() => {
+		setStatusMsg(null);
+		refreshModelService.startRefreshingModels(providerName, { enableProviderOnSuccess: true, doNotFire: false });
+	}, [refreshModelService, providerName]);
+
+	useEffect(() => {
+		if (state?.state === 'finished') setStatusMsg(t('onboarding.fetchSuccess'));
+		else if (state?.state === 'error') setStatusMsg(t('onboarding.fetchError'));
+	}, [state?.state]);
+
+	return (
+		<div className="flex items-center gap-2 mt-2">
+			<button
+				onClick={handleFetch}
+				disabled={isRefreshing}
+				className="px-3 py-1.5 text-xs bg-[#0e70c0] text-white rounded hover:bg-[#0e70c0]/80 transition-all whitespace-nowrap flex items-center gap-1 disabled:opacity-50"
+			>
+				{isRefreshing && <Loader2 className="w-3 h-3 animate-spin" />}
+				{isRefreshing ? t('onboarding.fetchingModels') : t('onboarding.fetchModels')}
+			</button>
+			{statusMsg && (
+				<span className={`text-xs ${state?.state === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>
+					{statusMsg}
+				</span>
+			)}
+		</div>
+	);
+};
+
+// Test connectivity button — sends a lightweight /v1/models call
+const TestConnectionButton = ({ providerName }: { providerName: RefreshableProviderName }) => {
+	const accessor = useAccessor();
+	const llmMessageService = accessor.get('ILLMMessageService');
+	const [status, setStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
+	const [errDetail, setErrDetail] = useState('');
+
+	const handleTest = useCallback(() => {
+		setStatus('testing');
+		setErrDetail('');
+		llmMessageService.openAICompatibleList({
+			providerName,
+			onSuccess: () => setStatus('success'),
+			onError: ({ error }) => {
+				setStatus('error');
+				setErrDetail(typeof error === 'string' ? error : String(error));
+			},
+		});
+	}, [llmMessageService, providerName]);
+
+	return (
+		<div className="flex items-center gap-2 mt-2">
+			<button
+				onClick={handleTest}
+				disabled={status === 'testing'}
+				className="px-3 py-1.5 text-xs bg-void-bg-2 border border-void-border-2 text-void-fg-1 rounded hover:bg-void-bg-2/80 transition-all whitespace-nowrap flex items-center gap-1 disabled:opacity-50"
+			>
+				{status === 'testing' ? <Loader2 className="w-3 h-3 animate-spin" /> : status === 'success' ? <Wifi className="w-3 h-3 text-emerald-400" /> : <Wifi className="w-3 h-3" />}
+				{status === 'testing' ? t('onboarding.testingConnection')
+					: status === 'success' ? t('onboarding.connectionSuccess')
+					: status === 'error' ? t('onboarding.connectionError')
+					: t('onboarding.testConnection')}
+			</button>
+			{status === 'error' && errDetail && (
+				<span className="text-xs text-red-400 max-w-[200px] truncate" title={errDetail}>{errDetail}</span>
+			)}
+		</div>
+	);
+};
+
 const AddProvidersPage = ({ pageIndex, setPageIndex }: { pageIndex: number, setPageIndex: (index: number) => void }) => {
-	const [currentTab, setCurrentTab] = useState<TabNameKey>('free');
+	const [currentTab, setCurrentTab] = useState<TabNameKey>('default');
 	const settingsState = useSettingsState();
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -186,7 +260,6 @@ const AddProvidersPage = ({ pageIndex, setPageIndex }: { pageIndex: number, setP
 			}, 5000);
 		}
 
-		// Cleanup function to clear the timeout if component unmounts or error changes
 		return () => {
 			if (timeoutId) {
 				clearTimeout(timeoutId);
@@ -194,14 +267,14 @@ const AddProvidersPage = ({ pageIndex, setPageIndex }: { pageIndex: number, setP
 		};
 	}, [errorMessage]);
 
-	const [, _forceUpdate] = useLocale();
+	const aiyiweiApiKeyFilled = !!settingsState.settingsOfProvider.aiyiwei.apiKey && settingsState.settingsOfProvider.aiyiwei.apiKey.length > 10;
 
 	return (<div className="flex flex-col md:flex-row w-full h-[80vh] gap-6 max-w-[900px] mx-auto relative">
 		{/* Left Column */}
 		<div className="md:w-1/4 w-full flex flex-col gap-6 p-6 border-none border-void-border-2 h-full overflow-y-auto">
-			{/* Tab Selector */}
+			{/* Tab Selector — only 3 tabs */}
 			<div className="flex md:flex-col gap-2">
-				{([...tabNameKeys, 'cloudOther'] as TabNameKey[]).map(tabKey => (
+				{tabNameKeys.map(tabKey => (
 					<button
 						key={tabKey}
 						className={`py-2 px-4 rounded-md text-left ${currentTab === tabKey
@@ -238,63 +311,59 @@ const AddProvidersPage = ({ pageIndex, setPageIndex }: { pageIndex: number, setP
 			</div>
 		</div>
 
-		{/* Right Column */}
-		<div className="flex-1 flex flex-col items-center justify-start p-6 h-full overflow-y-auto">
-			<div className="text-5xl mb-2 text-center w-full">{t('onboarding.addProvider')}</div>
+		{/* Right Column — no scroll on the column itself */}
+		<div className="flex-1 flex flex-col items-center justify-start p-6 h-full overflow-hidden">
+			{/* Top: title + provider settings (fixed, no scroll) */}
+			<div className="w-full max-w-xl shrink-0">
+				<div className="text-5xl mb-2 text-center w-full">{t('onboarding.addProvider')}</div>
 
-			<div className="w-full max-w-xl mt-4 mb-10">
-				<div className="text-4xl font-light my-4 w-full">{t(tabKeyToI18n[currentTab])}</div>
-				<div className="text-sm opacity-80 text-void-fg-3 my-4 w-full">{t(descKeyOfTab[currentTab])}</div>
+				<div className="w-full mt-4 mb-4">
+					<div className="text-4xl font-light my-2 w-full">{t(tabKeyToI18n[currentTab])}</div>
+					<div className="text-sm opacity-80 text-void-fg-3 my-2 w-full">{t(descKeyOfTab[currentTab])}</div>
+				</div>
+
+				{providerNamesOfTab[currentTab].map((providerName) => (
+					<div key={providerName} className="w-full mb-4">
+						<div className="text-xl mb-2">
+							{t('onboarding.add')} {displayInfoOfProviderName(providerName).title}
+						</div>
+						<div>
+							<SettingsForProvider providerName={providerName} showProviderTitle={false} showProviderSuggestions={true} />
+						</div>
+
+						{/* Fetch models + Test connection buttons for aiyiwei */}
+						{providerName === 'aiyiwei' && aiyiweiApiKeyFilled && (
+							<div className="flex flex-wrap gap-3 mt-3">
+								<FetchModelsButton providerName="aiyiwei" />
+								<TestConnectionButton providerName="aiyiwei" />
+							</div>
+						)}
+
+						{providerName === 'ollama' && <OllamaSetupInstructions />}
+					</div>
+				))}
 			</div>
 
-			{providerNamesOfTab[currentTab].map((providerName) => (
-				<div key={providerName} className="w-full max-w-xl mb-10">
-					<div className="text-xl mb-2">
-						{t('onboarding.add')} {displayInfoOfProviderName(providerName).title}
-						{providerName === 'gemini' && (
-							<span
-								data-tooltip-id="void-tooltip-provider-info"
-								data-tooltip-content="Gemini 2.5 Pro offers 25 free messages a day, and Gemini 2.5 Flash offers 500. We recommend using models down the line as you run out of free credits."
-								data-tooltip-place="right"
-								className="ml-1 text-xs align-top text-blue-400"
-							>*</span>
-						)}
-						{providerName === 'openRouter' && (
-							<span
-								data-tooltip-id="void-tooltip-provider-info"
-								data-tooltip-content="OpenRouter offers 50 free messages a day, and 1000 if you deposit $10. Only applies to models labeled ':free'."
-								data-tooltip-place="right"
-								className="ml-1 text-xs align-top text-blue-400"
-							>*</span>
-						)}
-					</div>
-					<div>
-						<SettingsForProvider providerName={providerName} showProviderTitle={false} showProviderSuggestions={true} />
-
-					</div>
-					{providerName === 'ollama' && <OllamaSetupInstructions />}
-				</div>
-			))}
-
-			{(currentTab === 'local' || currentTab === 'cloudOther') && (
-				<div className="w-full max-w-xl mt-8 bg-void-bg-2/50 rounded-lg p-6 border border-void-border-4">
-					<div className="flex items-center gap-2 mb-4">
+			{/* Middle: model list (scrollable, takes remaining space) */}
+			{(currentTab === 'default' || currentTab === 'local') && (
+				<div className="w-full max-w-xl mt-2 bg-void-bg-2/50 rounded-lg p-4 border border-void-border-4 flex flex-col min-h-0 flex-1 overflow-hidden">
+					<div className="flex items-center gap-2 mb-2 shrink-0">
 						<div className="text-xl font-medium">{t('onboarding.models')}</div>
 					</div>
 
 					{currentTab === 'local' && (
-						<div className="text-sm opacity-80 text-void-fg-3 my-4 w-full">{t('onboarding.localModelsAutoDetect')}</div>
+						<div className="text-sm opacity-80 text-void-fg-3 mb-2 w-full shrink-0">{t('onboarding.localModelsAutoDetect')}</div>
 					)}
 
-					{currentTab === 'local' && <ModelDump filteredProviders={localProviderNames} />}
-					{currentTab === 'cloudOther' && <ModelDump filteredProviders={cloudProviders} />}
+					<div className="overflow-y-auto min-h-0 flex-1">
+						{currentTab === 'default' && <ModelDump filteredProviders={['aiyiwei']} />}
+						{currentTab === 'local' && <ModelDump filteredProviders={localProviderNames} />}
+					</div>
 				</div>
 			)}
 
-
-
-			{/* Navigation buttons in right column */}
-			<div className="flex flex-col items-end w-full mt-auto pt-8">
+			{/* Bottom: navigation buttons (fixed at bottom) */}
+			<div className="flex flex-col items-end w-full max-w-xl shrink-0 pt-4">
 				{errorMessage && (
 					<div className="text-amber-400 mb-2 text-sm opacity-80 transition-opacity duration-300">{errorMessage}</div>
 				)}
@@ -302,13 +371,19 @@ const AddProvidersPage = ({ pageIndex, setPageIndex }: { pageIndex: number, setP
 					<PreviousButton onClick={() => setPageIndex(pageIndex - 1)} />
 					<NextButton
 						onClick={() => {
+							// Allow proceeding if aiyiwei API key is filled (models will auto-refresh)
+							if (aiyiweiApiKeyFilled) {
+								setPageIndex(pageIndex + 1);
+								setErrorMessage(null);
+								return;
+							}
+
 							const isDisabled = isFeatureNameDisabled('Chat', settingsState)
 
 							if (!isDisabled) {
 								setPageIndex(pageIndex + 1);
 								setErrorMessage(null);
 							} else {
-								// Show error message
 								setErrorMessage(t('onboarding.chatModelRequired'));
 							}
 						}}
@@ -515,17 +590,21 @@ const PrimaryActionButton = ({ children, className, ringSize, ...props }: { chil
 type WantToUseOption = 'smart' | 'private' | 'cheap' | 'all'
 
 const VoidOnboardingContent = () => {
-
-	const [, _forceLocaleUpdate] = useLocale();
+	const [locale] = useLocale()
 
 	const accessor = useAccessor()
 	const voidSettingsService = accessor.get('IVoidSettingsService')
 	const voidMetricsService = accessor.get('IMetricsService')
+	const localeService = accessor.get('ILocaleService')
+	const languagePackService = accessor.get('ILanguagePackService')
+	const environmentService = accessor.get('IEnvironmentService')
+	const fileService = accessor.get('IFileService')
+	const notificationService = accessor.get('INotificationService')
+	const extensionManagementService = accessor.get('IExtensionManagementService')
 
 	const voidSettingsState = useSettingsState()
 
 	const [pageIndex, setPageIndex] = useState(0)
-
 
 	// page 1 state
 	const [wantToUseOption, setWantToUseOption] = useState<WantToUseOption>('smart')
@@ -571,6 +650,7 @@ const VoidOnboardingContent = () => {
 	const isAtLeastOneModel = selectedProviderName && voidSettingsState.settingsOfProvider[selectedProviderName].models.length >= 1
 
 	const didFillInSelectedProviderSettings = !!(didFillInProviderSettings && isApiKeyLongEnoughIfApiKeyExists && isAtLeastOneModel)
+	const isDevMode = !environmentService.isBuilt
 
 	const prevAndNextButtons = <div className="max-w-[600px] w-full mx-auto flex flex-col items-end">
 		<div className="flex items-center gap-2">
@@ -583,6 +663,19 @@ const VoidOnboardingContent = () => {
 		</div>
 	</div>
 
+	const handleCompleteOnboarding = useCallback(async () => {
+		await voidSettingsService.setGlobalSetting('isOnboardingComplete', true);
+		voidMetricsService.capture('Completed Onboarding', { selectedProviderName, wantToUseOption })
+
+		const reactLocale = getLocale();
+
+		try {
+			await applyGlobalLocale({ reactLocale, isDevMode, localeService, languagePackService, environmentService, fileService, notificationService, extensionManagementService })
+		} catch (e) {
+			console.error('Failed to set VSCode locale', e);
+		}
+	}, [voidSettingsService, voidMetricsService, selectedProviderName, wantToUseOption, isDevMode, localeService, languagePackService, environmentService, fileService, notificationService, extensionManagementService]);
+
 
 	const lastPagePrevAndNextButtons = <div className="max-w-[600px] w-full mx-auto flex flex-col items-end">
 		<div className="flex items-center gap-2">
@@ -590,10 +683,7 @@ const VoidOnboardingContent = () => {
 				onClick={() => { setPageIndex(pageIndex - 1) }}
 			/>
 			<PrimaryActionButton
-				onClick={() => {
-					voidSettingsService.setGlobalSetting('isOnboardingComplete', true);
-					voidMetricsService.capture('Completed Onboarding', { selectedProviderName, wantToUseOption })
-				}}
+				onClick={handleCompleteOnboarding}
 				ringSize={voidSettingsState.globalSettings.isOnboardingComplete ? 'screen' : undefined}
 			>{t('onboarding.enterTheVoid')}</PrimaryActionButton>
 		</div>
@@ -602,17 +692,17 @@ const VoidOnboardingContent = () => {
 
 	// cannot be md
 	const basicDescOfWantToUseOption: { [wantToUseOption in WantToUseOption]: string } = {
-		smart: "Models with the best performance on benchmarks.",
-		private: "Host on your computer or local network for full data privacy.",
-		cheap: "Free and affordable options.",
+		smart: t('onboarding.wantToUse.smartDesc'),
+		private: t('onboarding.wantToUse.privateDesc'),
+		cheap: t('onboarding.wantToUse.cheapDesc'),
 		all: "",
 	}
 
 	// can be md
 	const detailedDescOfWantToUseOption: { [wantToUseOption in WantToUseOption]: string } = {
-		smart: "Most intelligent and best for agent mode.",
-		private: "Private-hosted so your data never leaves your computer or network. [Email us](mailto:founders@voideditor.com) for help setting up at your company.",
-		cheap: "Use great deals like Gemini 2.5 Pro, or self-host a model with Ollama or vLLM for free.",
+		smart: t('onboarding.wantToUse.smartDetail'),
+		private: t('onboarding.wantToUse.privateDetail'),
+		cheap: t('onboarding.wantToUse.cheapDetail'),
 		all: "",
 	}
 
@@ -655,11 +745,14 @@ const VoidOnboardingContent = () => {
 					<FadeIn
 						delayMs={1000}
 					>
-						<PrimaryActionButton
-							onClick={() => { setPageIndex(1) }}
-						>
-							{t('onboarding.getStarted')}
-						</PrimaryActionButton>
+						<div className="flex items-center gap-4">
+							<LanguageSelector />
+							<PrimaryActionButton
+								onClick={() => { setPageIndex(1) }}
+							>
+								{t('onboarding.getStarted')}
+							</PrimaryActionButton>
+						</div>
 					</FadeIn>
 
 				</div>
@@ -690,7 +783,7 @@ const VoidOnboardingContent = () => {
 	}
 
 
-	return <div key={pageIndex} className="w-full h-[80vh] text-left mx-auto flex flex-col items-center justify-center">
+	return <div key={`${locale}-${pageIndex}`} className="w-full h-[80vh] text-left mx-auto flex flex-col items-center justify-center">
 		<ErrorBoundary>
 			{contentOfIdx[pageIndex]}
 		</ErrorBoundary>

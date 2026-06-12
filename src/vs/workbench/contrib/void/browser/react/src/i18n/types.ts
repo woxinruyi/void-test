@@ -3,7 +3,7 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
 
-export type SupportedLocale = 'en' | 'zh-cn';
+export type SupportedLocale = 'en' | 'zh-cn' | 'ko';
 
 export interface TranslationKeys {
 	// Onboarding Page 0
@@ -11,6 +11,9 @@ export interface TranslationKeys {
 	'onboarding.getStarted': string;
 	// Onboarding Page 1 — Add Providers
 	'onboarding.addProvider': string;
+	'onboarding.default': string;
+	'onboarding.defaultDesc': string;
+	'onboarding.getApiKey': string;
 	'onboarding.free': string;
 	'onboarding.paid': string;
 	'onboarding.local': string;
@@ -32,12 +35,395 @@ export interface TranslationKeys {
 	'onboarding.featureAutocomplete': string;
 	'onboarding.featureFastApply': string;
 	'onboarding.featureSourceControl': string;
+	// Onboarding Page 1 — Model operations
+	'onboarding.compatible': string;
+	'onboarding.compatibleDesc': string;
+	'onboarding.fetchModels': string;
+	'onboarding.fetchingModels': string;
+	'onboarding.fetchSuccess': string;
+	'onboarding.fetchError': string;
+	'onboarding.testConnection': string;
+	'onboarding.testingConnection': string;
+	'onboarding.connectionSuccess': string;
+	'onboarding.connectionError': string;
 	// Onboarding Page 2 — Settings & Themes
 	'onboarding.settingsAndThemes': string;
 	'onboarding.transferSettings': string;
 	'onboarding.enterTheVoid': string;
+	// Models
+	'models.searchPlaceholder': string;
 	// Shared
 	'common.yes': string;
 	'common.no': string;
 	'common.yesStar': string;
+	'common.save': string;
+	'common.cancel': string;
+	'common.openSettings': string;
+	'common.enabled': string;
+	'common.disabled': string;
+	'common.dismiss': string;
+	'common.showFullError': string;
+	// Chat
+	'chat.inputPlaceholder': string;
+	'chat.suggestions': string;
+	'chat.suggestions.summarize': string;
+	'chat.suggestions.rustTypes': string;
+	'chat.suggestions.voidrules': string;
+	'chat.previousThreads': string;
+	// Warnings
+	'warnings.enableModel': string;
+	'warnings.addModel': string;
+	'warnings.providerRequired': string;
+	'warnings.noModelsAvailable': string;
+	// Settings — nav
+	'settings.title': string;
+	'settings.nav.models': string;
+	'settings.nav.localProviders': string;
+	'settings.nav.providers': string;
+	'settings.nav.featureOptions': string;
+	'settings.nav.general': string;
+	'settings.nav.mcp': string;
+	'settings.nav.all': string;
+	'settings.nav.trust': string;
+	// Settings — section titles
+	'settings.features.title': string;
+	'settings.features.desc': string;
+	'settings.trust.title': string;
+	'settings.trust.desc': string;
+	'settings.general.title': string;
+	'settings.general.desc': string;
+	'settings.general.version': string;
+	// Settings — skill
+	'settings.nav.skill': string;
+	'settings.skill.title': string;
+	'settings.skill.desc': string;
+	'settings.skill.marketplace': string;
+	'settings.skill.marketplace.desc': string;
+	'settings.skill.installed': string;
+	'settings.skill.installed.empty': string;
+	'settings.skill.add': string;
+	'settings.skill.add.placeholder': string;
+	'settings.skill.add.urlPlaceholder': string;
+	'settings.skill.add.button': string;
+	'settings.skill.remove': string;
+	'settings.skill.enable': string;
+	'settings.skill.disable': string;
+	'settings.skill.recommended': string;
+	// Settings — models
+	'settings.models.title': string;
+	'settings.models.intro': string;
+	'settings.models.aggregated.title': string;
+	'settings.models.aggregated.desc': string;
+	'settings.models.openAI.title': string;
+	'settings.models.openAI.desc': string;
+	'settings.models.upToDate': string;
+	'settings.models.notFound': string;
+	'settings.models.manuallyRefresh': string;
+	// Settings — local providers
+	'settings.localProviders.title': string;
+	'settings.localProviders.desc': string;
+	// Settings — main providers
+	'settings.providers.title': string;
+	'settings.providers.desc': string;
+	// Settings — feature options
+	'settings.featureOptions.title': string;
+	'settings.features.autocomplete.experimental': string;
+	'settings.features.autocomplete.fimOnly': string;
+	'settings.features.autocomplete.fimTooltip': string;
+	'settings.features.apply.desc': string;
+	'settings.features.apply.sameAsChat': string;
+	'settings.features.apply.differentModel': string;
+	'settings.features.tools.title': string;
+	'settings.features.tools.desc': string;
+	'settings.features.tools.autoApprove': string;
+	'settings.features.tools.fixLintErrors': string;
+	'settings.features.tools.autoAcceptLLMChanges': string;
+	'settings.features.editor.title': string;
+	'settings.features.editor.desc': string;
+	'settings.features.editor.showSuggestions': string;
+	'settings.features.scm.desc': string;
+	'settings.features.scm.sameAsChat': string;
+	'settings.features.scm.differentModel': string;
+	// Settings — general
+	'settings.general.oneClickSwitch.title': string;
+	'settings.general.oneClickSwitch.desc': string;
+	'settings.general.importExport.title': string;
+	'settings.general.importExport.desc': string;
+	'settings.general.importExport.importSettings': string;
+	'settings.general.importExport.exportSettings': string;
+	'settings.general.importExport.resetSettings': string;
+	'settings.general.importExport.importChats': string;
+	'settings.general.importExport.exportChats': string;
+	'settings.general.importExport.resetChats': string;
+	'settings.general.importExport.importSuccess': string;
+	'settings.general.importExport.importFailed': string;
+	'settings.general.builtInSettings.title': string;
+	'settings.general.builtInSettings.desc': string;
+	'settings.general.builtInSettings.general': string;
+	'settings.general.builtInSettings.keyboard': string;
+	'settings.general.builtInSettings.theme': string;
+	'settings.general.builtInSettings.openLogs': string;
+	'settings.general.metrics.title': string;
+	'settings.general.metrics.desc': string;
+	'settings.general.metrics.optOut': string;
+	'settings.general.aiInstructions.title': string;
+	'settings.general.aiInstructions.desc': string;
+	'settings.general.aiInstructions.disableSystemMessage': string;
+	'settings.general.aiInstructions.disableDesc': string;
+	'settings.general.language.title': string;
+	// Settings — mcp
+	'settings.mcp.title': string;
+	'settings.mcp.desc': string;
+	'settings.mcp.addServer': string;
+	// Settings — model override dialog
+	'settings.modelOverride.title': string;
+	'settings.modelOverride.packagedModel': string;
+	'settings.modelOverride.unrecognized': string;
+	'settings.modelOverride.recognized': string;
+	'settings.modelOverride.overrideToggle': string;
+	'settings.modelOverride.invalidJson': string;
+	'settings.modelOverride.sourcecodeRef': string;
+	// Settings — model list / add model
+	'settings.models.selectProvider': string;
+	'settings.models.enterModelName': string;
+	'settings.models.addProviderToEnable': string;
+	'settings.models.showInDropdown': string;
+	'settings.models.hideFromDropdown': string;
+	'settings.models.detectedLocally': string;
+	'settings.models.customModel': string;
+	'settings.models.advancedSettings': string;
+	'settings.models.providerName': string;
+	'settings.models.modelName': string;
+	'settings.models.installOllamaModel': string;
+	'settings.models.addModelForProvider': string;
+	'settings.models.autoDetectDesc': string;
+	'settings.models.fastApply': string;
+	'settings.models.slowApply': string;
+	'settings.models.fastApplyDetail': string;
+	'settings.models.slowApplyDetail': string;
+	'settings.models.modelAlreadyExists': string;
+	// Settings — Ollama setup
+	'settings.ollama.title': string;
+	'settings.ollama.step1': string;
+	'settings.ollama.step2': string;
+	'settings.ollama.step3': string;
+	'settings.ollama.autoDetect': string;
+	'settings.models.added': string;
+	'settings.models.add': string;
+	'settings.models.addAModel': string;
+	'settings.general.aiInstructions.placeholder': string;
+	'settings.general.confirmReset': string;
+	// Feature display names
+	'settings.features.autocomplete.name': string;
+	'settings.features.apply.name': string;
+	'settings.features.scm.name': string;
+	'settings.features.editor.name': string;
+	'settings.features.chat.name': string;
+	'settings.features.quickEdit.name': string;
+	// Chat — tool titles (done/proposed/running for each builtin tool)
+	'chat.tools.read_file.done': string;
+	'chat.tools.read_file.proposed': string;
+	'chat.tools.read_file.running': string;
+	'chat.tools.ls_dir.done': string;
+	'chat.tools.ls_dir.proposed': string;
+	'chat.tools.ls_dir.running': string;
+	'chat.tools.get_dir_tree.done': string;
+	'chat.tools.get_dir_tree.proposed': string;
+	'chat.tools.get_dir_tree.running': string;
+	'chat.tools.search_pathnames_only.done': string;
+	'chat.tools.search_pathnames_only.proposed': string;
+	'chat.tools.search_pathnames_only.running': string;
+	'chat.tools.search_for_files.done': string;
+	'chat.tools.search_for_files.proposed': string;
+	'chat.tools.search_for_files.running': string;
+	'chat.tools.create_file_or_folder.done': string;
+	'chat.tools.create_file_or_folder.proposed': string;
+	'chat.tools.create_file_or_folder.running': string;
+	'chat.tools.delete_file_or_folder.done': string;
+	'chat.tools.delete_file_or_folder.proposed': string;
+	'chat.tools.delete_file_or_folder.running': string;
+	'chat.tools.edit_file.done': string;
+	'chat.tools.edit_file.proposed': string;
+	'chat.tools.edit_file.running': string;
+	'chat.tools.rewrite_file.done': string;
+	'chat.tools.rewrite_file.proposed': string;
+	'chat.tools.rewrite_file.running': string;
+	'chat.tools.run_command.done': string;
+	'chat.tools.run_command.proposed': string;
+	'chat.tools.run_command.running': string;
+	'chat.tools.run_persistent_command.done': string;
+	'chat.tools.run_persistent_command.proposed': string;
+	'chat.tools.run_persistent_command.running': string;
+	'chat.tools.open_persistent_terminal.done': string;
+	'chat.tools.open_persistent_terminal.proposed': string;
+	'chat.tools.open_persistent_terminal.running': string;
+	'chat.tools.kill_persistent_terminal.done': string;
+	'chat.tools.kill_persistent_terminal.proposed': string;
+	'chat.tools.kill_persistent_terminal.running': string;
+	'chat.tools.read_lint_errors.done': string;
+	'chat.tools.read_lint_errors.proposed': string;
+	'chat.tools.read_lint_errors.running': string;
+	'chat.tools.search_in_file.done': string;
+	'chat.tools.search_in_file.proposed': string;
+	'chat.tools.search_in_file.running': string;
+	// Chat — non-builtin tool descriptors
+	'chat.tools.called': string;
+	'chat.tools.calling': string;
+	'chat.tools.call': string;
+	'chat.tools.mcp': string;
+	'chat.tools.error': string;
+	'chat.tools.canceled': string;
+	'chat.tools.errorRunningTool': string;
+	'chat.tools.lintErrors': string;
+	'chat.tools.noLintErrors': string;
+	'chat.tools.resultsTruncated': string;
+	'chat.tools.resultsTruncatedWithCount': string;
+	'chat.tools.resultCount': string;
+	'chat.tools.runningIn': string;
+	'chat.tools.lintErrorLine': string;
+	'chat.tools.truncatedAfter': string;
+	'chat.tools.partPage': string;
+	'chat.tools.reasoning': string;
+	'chat.tools.usesRegex': string;
+	'chat.tools.goToFile': string;
+	'chat.tools.rejectAll': string;
+	'chat.tools.acceptAll': string;
+	'chat.tools.rejectFile': string;
+	'chat.tools.acceptFile': string;
+	// Chat — thread actions
+	'chat.thread.duplicate': string;
+	'chat.thread.cancel': string;
+	'chat.thread.confirm': string;
+	'chat.thread.delete': string;
+	// Settings — model actions
+	'settings.models.delete': string;
+	// Editor widgets
+	'editor.editInline': string;
+	'editor.addToChat': string;
+	'settings.mcp.noToolsAvailable': string;
+	'common.noResultsFound': string;
+	'common.noChangesFound': string;
+	'common.changeOf': string;
+	'common.enterTextToFilter': string;
+	'settings.mcp.commandLabel': string;
+	'settings.mcp.modelscope.title': string;
+	'settings.mcp.modelscope.desc': string;
+	'settings.mcp.modelscope.sample': string;
+	// Tooltip — Ollama starter
+	'tooltip.goodStarterModels': string;
+	'tooltip.forChat': string;
+	'tooltip.forAutocomplete': string;
+	'tooltip.useLargest': string;
+	// Error display
+	'error.fullError': string;
+	// Markdown render
+	'markdown.unknownToken': string;
+	// Chat — reasoning controls
+	'chat.thinking': string;
+	'chat.editMessagePlaceholder': string;
+	// QuickEdit
+	'quickEdit.placeholder': string;
+	// Onboarding — additional
+	'onboarding.transferFrom': string;
+	'onboarding.redoOnboarding': string;
+	'onboarding.wantToUse.smart': string;
+	'onboarding.wantToUse.private': string;
+	'onboarding.wantToUse.cheap': string;
+	'onboarding.wantToUse.smartDesc': string;
+	'onboarding.wantToUse.privateDesc': string;
+	'onboarding.wantToUse.cheapDesc': string;
+	'onboarding.wantToUse.smartDetail': string;
+	'onboarding.wantToUse.privateDetail': string;
+	'onboarding.wantToUse.cheapDetail': string;
+	'onboarding.transferring': string;
+	'onboarding.settingsTransferred': string;
+	// Trust & Approval (P0-1: improve-tool-approval-policy)
+	'settings.trust.level.conservative.title': string;
+	'settings.trust.level.conservative.desc': string;
+	'settings.trust.level.standard.title': string;
+	'settings.trust.level.standard.desc': string;
+	'settings.trust.level.seamless.title': string;
+	'settings.trust.level.seamless.desc': string;
+	'settings.trust.editsInWorkspace': string;
+	'settings.trust.editsOutsideWorkspace': string;
+	'settings.trust.terminalAllowlist': string;
+	'settings.trust.terminalAny': string;
+	'settings.trust.mcpAll': string;
+	'settings.trust.terminalAllowlistPatterns.title': string;
+	'settings.trust.terminalAllowlistPatterns.hint': string;
+	'settings.trust.showAdvanced': string;
+	'settings.trust.hideAdvanced': string;
+	'settings.trust.legacyMigratedHint': string;
+	// Chat tool_request trust buttons
+	'chat.tool.trust.session': string;
+	'chat.tool.trust.permanent': string;
+	'chat.tool.trust.sessionHint': string;
+	'chat.tool.trust.permanentHint': string;
+	'chat.tool.trust.scope.editsInWorkspace': string;
+	'chat.tool.trust.scope.editsOutsideWorkspace': string;
+	'chat.tool.trust.scope.terminalAny': string;
+	'chat.tool.trust.scope.mcpAll': string;
+	// Reasoning strategy (P0-2)
+	'settings.reasoning.title': string;
+	'settings.reasoning.desc': string;
+	'settings.reasoning.autoEnabled': string;
+	'settings.reasoning.defaultTier': string;
+	'settings.reasoning.tier.default': string;
+	'settings.reasoning.tier.high': string;
+	'settings.reasoning.tier.max': string;
+	'settings.reasoning.keywordTriggersEnabled': string;
+	'settings.reasoning.keywordTriggersHint': string;
+	'settings.reasoning.heuristicsEnabled': string;
+	'settings.reasoning.heuristicsHint': string;
+	'settings.reasoning.threadInherit': string;
+	'settings.reasoning.hintBill': string;
+	// Settings — marketplace
+	'settings.marketplace.search': string;
+	'settings.marketplace.sortDefault': string;
+	'settings.marketplace.sortDownloads': string;
+	'settings.marketplace.sortScore': string;
+	'settings.marketplace.sortUpdated': string;
+	'settings.marketplace.filterCode': string;
+	'settings.marketplace.filterAll': string;
+	'settings.marketplace.install': string;
+	'settings.marketplace.installing': string;
+	'settings.marketplace.installed': string;
+	'settings.marketplace.details': string;
+	'settings.marketplace.preview': string;
+	'settings.marketplace.loadMore': string;
+	'settings.marketplace.noResults': string;
+	'settings.marketplace.error': string;
+	'settings.marketplace.uses': string;
+	'settings.marketplace.score': string;
+	'settings.marketplace.verified': string;
+	'settings.marketplace.sourceSmithery': string;
+	'settings.marketplace.sourceModelScope': string;
+	'settings.marketplace.apiKeyRequired': string;
+	'settings.marketplace.apiKeyHint': string;
+	'settings.marketplace.searchMCP': string;
+	'settings.marketplace.searchSkills': string;
+	'settings.mcp.marketplace': string;
+	'settings.skill.marketplace.browse': string;
+	'settings.general.smitheryApiKey': string;
+	'settings.general.smitheryApiKeyDesc': string;
+	// Settings — code index
+	'settings.nav.codeIndex': string;
+	'settings.codeIndex.title': string;
+	'settings.codeIndex.desc': string;
+	'settings.codeIndex.status': string;
+	'settings.codeIndex.status.idle': string;
+	'settings.codeIndex.status.indexing': string;
+	'settings.codeIndex.status.ready': string;
+	'settings.codeIndex.status.error': string;
+	'settings.codeIndex.indexedFiles': string;
+	'settings.codeIndex.indexedChunks': string;
+	'settings.codeIndex.cachePath': string;
+	'settings.codeIndex.cacheSize': string;
+	'settings.codeIndex.noCache': string;
+	'settings.codeIndex.clearCache': string;
+	'settings.codeIndex.clearCacheConfirm': string;
+	'settings.codeIndex.cacheCleared': string;
+	'settings.codeIndex.rebuildIndex': string;
+	'settings.codeIndex.stopIndex': string;
+	'settings.codeIndex.noWorkspace': string;
 }

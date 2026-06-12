@@ -3,17 +3,20 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import * as fs from 'fs';
 import electron, { BrowserWindowConstructorOptions } from 'electron';
 import { DeferredPromise, RunOnceScheduler, timeout, Delayer } from '../../../base/common/async.js';
 import { CancellationToken } from '../../../base/common/cancellation.js';
 import { toErrorMessage } from '../../../base/common/errorMessage.js';
 import { Emitter, Event } from '../../../base/common/event.js';
+import { parse } from '../../../base/common/jsonc.js';
 import { Disposable } from '../../../base/common/lifecycle.js';
 import { FileAccess, Schemas } from '../../../base/common/network.js';
+import { resolveNLSConfiguration } from '../../../base/node/nls.js';
 import { getMarks, mark } from '../../../base/common/performance.js';
 import { isBigSurOrNewer, isMacintosh, isWindows } from '../../../base/common/platform.js';
 import { URI } from '../../../base/common/uri.js';
-import { localize } from '../../../nls.js';
+import { INLSConfiguration, localize } from '../../../nls.js';
 import { release } from 'os';
 import { ISerializableCommandAction } from '../../action/common/action.js';
 import { IBackupMainService } from '../../backup/electron-main/backup.js';
@@ -1132,6 +1135,11 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 
 		// Copy our current config for reuse
 		const configuration = Object.assign({}, this._config);
+		try {
+			await this.refreshLocalizedWindowConfiguration(configuration);
+		} catch (error) {
+			this.logService.error(error);
+		}
 
 		// Validate workspace
 		configuration.workspace = await this.validateWorkspaceBeforeReload(configuration);
@@ -1167,6 +1175,94 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 
 		// Load config
 		this.load(configuration, { isReload: true, disableExtensions: cli?.['disable-extensions'] });
+	}
+
+	private async refreshLocalizedWindowConfiguration(configuration: INativeWindowConfiguration): Promise<void> {
+		if (!process.env['VSCODE_DEV']) {
+			const nlsConfiguration = await this.resolveWindowNLSConfiguration();
+			process.env['VSCODE_NLS_CONFIG'] = JSON.stringify(nlsConfiguration);
+			globalThis._VSCODE_NLS_LANGUAGE = nlsConfiguration.resolvedLanguage;
+			globalThis._VSCODE_NLS_MESSAGES = await this.resolveWindowNLSMessages(nlsConfiguration);
+		}
+
+		configuration.nls = {
+			messages: globalThis._VSCODE_NLS_MESSAGES,
+			language: globalThis._VSCODE_NLS_LANGUAGE
+		};
+	}
+
+	private async resolveWindowNLSConfiguration(): Promise<INLSConfiguration> {
+		const userLocale = await this.getConfiguredLocale();
+		const osLocale = processZhLocale((electron.app.getPreferredSystemLanguages()?.[0] ?? 'en').toLowerCase());
+
+		if (userLocale) {
+			return resolveNLSConfiguration({
+				userLocale,
+				osLocale,
+				commit: this.productService.commit,
+				userDataPath: this.environmentMainService.userDataPath,
+				nlsMetadataPath: FileAccess.asFileUri('').fsPath
+			});
+		}
+
+		let fallbackLocale = electron.app.getLocale();
+		if (!fallbackLocale) {
+			return {
+				userLocale: 'en',
+				osLocale,
+				resolvedLanguage: 'en',
+				defaultMessagesFile: FileAccess.asFileUri('nls.messages.json').fsPath,
+				locale: 'en',
+				availableLanguages: {}
+			};
+		}
+
+		fallbackLocale = processZhLocale(fallbackLocale.toLowerCase());
+
+		return resolveNLSConfiguration({
+			userLocale: fallbackLocale,
+			osLocale,
+			commit: this.productService.commit,
+			userDataPath: this.environmentMainService.userDataPath,
+			nlsMetadataPath: FileAccess.asFileUri('').fsPath
+		});
+	}
+
+	private async resolveWindowNLSMessages(nlsConfiguration: INLSConfiguration): Promise<string[]> {
+		const messagesFile = nlsConfiguration.languagePack?.messagesFile ?? nlsConfiguration.defaultMessagesFile;
+
+		try {
+			return JSON.parse((await fs.promises.readFile(messagesFile)).toString()) as string[];
+		} catch (error) {
+			this.logService.error(`Error reading NLS messages file ${messagesFile}: ${toErrorMessage(error)}`);
+
+			if (nlsConfiguration.defaultMessagesFile !== messagesFile) {
+				return JSON.parse((await fs.promises.readFile(nlsConfiguration.defaultMessagesFile)).toString()) as string[];
+			}
+
+			throw error;
+		}
+	}
+
+	private async getConfiguredLocale(): Promise<string | undefined> {
+		const locale = this.environmentMainService.args['locale'];
+		if (locale) {
+			return locale.toLowerCase();
+		}
+
+		try {
+			const raw = await fs.promises.readFile(this.environmentMainService.argvResource.fsPath, 'utf8');
+			const argvConfig = parse(raw) as { locale?: string };
+			if (typeof argvConfig?.locale === 'string') {
+				return argvConfig.locale.toLowerCase();
+			}
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+				this.logService.warn(`Unable to read argv.json from ${this.environmentMainService.argvResource.fsPath}: ${toErrorMessage(error)}`);
+			}
+		}
+
+		return typeof this.productService.defaultLocale === 'string' ? processZhLocale(this.productService.defaultLocale.toLowerCase()) : undefined;
 	}
 
 	private async validateWorkspaceBeforeReload(configuration: INativeWindowConfiguration): Promise<IWorkspaceIdentifier | ISingleFolderWorkspaceIdentifier | undefined> {
@@ -1545,6 +1641,19 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 		// Deregister the loggers for this window
 		this.loggerMainService.deregisterLoggers(this.id);
 	}
+}
+
+function processZhLocale(appLocale: string): string {
+	if (appLocale.startsWith('zh')) {
+		const region = appLocale.split('-')[1];
+		if (['hans', 'cn', 'sg', 'my'].includes(region)) {
+			return 'zh-cn';
+		}
+
+		return 'zh-tw';
+	}
+
+	return appLocale;
 }
 
 class UnresponsiveError extends Error {

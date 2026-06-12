@@ -82,7 +82,10 @@ function isUpToDate(extension) {
 }
 function getExtensionDownloadStream(extension) {
     let input;
-    if (extension.vsix) {
+    if (extension.downloadUrl) {
+        input = ext.fromDownloadUrl(extension);
+    }
+    else if (extension.vsix) {
         input = ext.fromVsix(path_1.default.join(root, extension.vsix), extension);
     }
     else if (productjson.extensionsGallery?.serviceUrl) {
@@ -176,4 +179,3 @@ if (require.main === module) {
         process.exit(1);
     });
 }
-//# sourceMappingURL=builtInExtensions.js.map

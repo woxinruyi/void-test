@@ -21,7 +21,7 @@ import { isWindows } from '../../../../base/common/platform.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
 import { FeatureName } from '../common/voidSettingsTypes.js';
 import { IConvertToLLMMessageService } from './convertToLLMMessageService.js';
-// import { IContextGatheringService } from './contextGatheringService.js';
+import { IContextGatheringService } from './contextGatheringService.js';
 
 
 
@@ -550,8 +550,10 @@ const getCompletionOptions = (prefixAndSuffix: PrefixAndSuffixInfo, relevantCont
 	const isLinePrefixEmpty = removeAllWhitespace(prefixToTheLeftOfCursor).length === 0
 	const isLineSuffixEmpty = removeAllWhitespace(suffixToTheRightOfCursor).length === 0
 
-	// TODO add context to prefix
-	// llmPrefix = '\n\n/* Relevant context:\n' + relevantContext + '\n*/\n' + llmPrefix
+	// inject context as commented prefix if available
+	if (relevantContext) {
+		prefix = `// Relevant context:\n${relevantContext}\n\n${prefix}`
+	}
 
 	// if we just accepted an autocompletion, predict a multiline completion starting on the next line
 	if (justAcceptedAutocompletion && isLineSuffixEmpty) {
@@ -754,11 +756,12 @@ export class AutocompleteService extends Disposable implements IAutocompleteServ
 
 
 		// gather relevant context from the code around the user's selection and definitions
-		// const relevantSnippetsList = await this._contextGatheringService.readCachedSnippets(model, position, 3);
-		// const relevantSnippetsList = this._contextGatheringService.getCachedSnippets();
-		// const relevantSnippets = relevantSnippetsList.map((text) => `${text}`).join('\n-------------------------------\n')
-		// console.log('@@---------------------\n' + relevantSnippets)
-		const relevantContext = ''
+		const relevantSnippetsList = this._contextGatheringService.getCachedSnippets();
+		const MAX_CONTEXT_CHARS = 2000 // ~512 tokens
+		const relevantContext = relevantSnippetsList
+			.map((text) => `// ---\n${text.split('\n').map(line => `// ${line}`).join('\n')}`)
+			.join('\n')
+			.substring(0, MAX_CONTEXT_CHARS)
 
 		const { shouldGenerate, predictionType, llmPrefix, llmSuffix, stopTokens } = getCompletionOptions(prefixAndSuffix, relevantContext, justAcceptedAutocompletion)
 
@@ -894,8 +897,8 @@ export class AutocompleteService extends Disposable implements IAutocompleteServ
 		@IEditorService private readonly _editorService: IEditorService,
 		@IModelService private readonly _modelService: IModelService,
 		@IVoidSettingsService private readonly _settingsService: IVoidSettingsService,
-		@IConvertToLLMMessageService private readonly _convertToLLMMessageService: IConvertToLLMMessageService
-		// @IContextGatheringService private readonly _contextGatheringService: IContextGatheringService,
+		@IConvertToLLMMessageService private readonly _convertToLLMMessageService: IConvertToLLMMessageService,
+		@IContextGatheringService private readonly _contextGatheringService: IContextGatheringService,
 	) {
 		super()
 

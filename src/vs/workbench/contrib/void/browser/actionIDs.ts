@@ -24,3 +24,7 @@ export const VOID_REJECT_FILE_ACTION_ID = 'void.rejectFile'
 export const VOID_ACCEPT_ALL_DIFFS_ACTION_ID = 'void.acceptAllDiffs'
 
 export const VOID_REJECT_ALL_DIFFS_ACTION_ID = 'void.rejectAllDiffs'
+
+export const VOID_CHECKPOINT_REVERT_ACTION_ID = 'void.checkpoint.revertToTurn'
+
+export const VOID_CHECKPOINT_LIST_TURNS_ACTION_ID = 'void.checkpoint.listTurns'

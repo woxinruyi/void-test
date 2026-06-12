@@ -41,6 +41,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.fromMarketplace = fromMarketplace;
+exports.fromDownloadUrl = fromDownloadUrl;
 exports.fromVsix = fromVsix;
 exports.fromGithub = fromGithub;
 exports.packageNonNativeLocalExtensionsStream = packageNonNativeLocalExtensionsStream;
@@ -246,7 +247,11 @@ const baseHeaders = {
     'User-Agent': userAgent,
     'X-Market-User-Id': '291C1CD0-051A-4123-9B4B-30D60EF52EE2',
 };
-function fromMarketplace(serviceUrl, { name: extensionName, version, sha256, metadata }) {
+function fromMarketplace(serviceUrl, extension) {
+    if (extension.downloadUrl) {
+        return fromDownloadUrl(extension);
+    }
+    const { name: extensionName, version, sha256, metadata } = extension;
     const json = require('gulp-json-editor');
     const [publisher, name] = extensionName.split('.');
     const url = `${serviceUrl}/publishers/${publisher}/vsextensions/${name}/${version}/vspackage`;
@@ -259,6 +264,40 @@ function fromMarketplace(serviceUrl, { name: extensionName, version, sha256, met
         },
         checksumSha256: sha256
     })
+        .pipe(vzip.src())
+        .pipe((0, gulp_filter_1.default)('extension/**'))
+        .pipe((0, gulp_rename_1.default)(p => p.dirname = p.dirname.replace(/^extension\/?/, '')))
+        .pipe(packageJsonFilter)
+        .pipe((0, gulp_buffer_1.default)())
+        .pipe(json({ __metadata: metadata }))
+        .pipe(packageJsonFilter.restore);
+}
+async function resolveExpectedChecksum({ sha256, sha256Url }) {
+    if (sha256) {
+        return sha256;
+    }
+    if (!sha256Url) {
+        return undefined;
+    }
+    const checksumFile = await (0, fetch_1.fetchUrl)(sha256Url, {});
+    return checksumFile.contents.toString().trim().split(/\s+/)[0]?.toLowerCase();
+}
+function fromDownloadUrl(extension) {
+    const json = require('gulp-json-editor');
+    const { name: extensionName, version, downloadUrl, metadata } = extension;
+    (0, fancy_log_1.default)('Downloading extension from URL:', ansi_colors_1.default.yellow(`${extensionName}@${version}`), '...');
+    const packageJsonFilter = (0, gulp_filter_1.default)('package.json', { restore: true });
+    return event_stream_1.default.readArray([extension])
+        .pipe(event_stream_1.default.map((definition, cb) => {
+        (async () => {
+            if (!downloadUrl) {
+                throw new Error(`Missing downloadUrl for built-in extension ${extensionName}@${version}`);
+            }
+            const checksumSha256 = await resolveExpectedChecksum(definition);
+            const file = await (0, fetch_1.fetchUrl)(downloadUrl, { checksumSha256 });
+            cb(undefined, file);
+        })().catch(error => cb(error));
+    }))
         .pipe(vzip.src())
         .pipe((0, gulp_filter_1.default)('extension/**'))
         .pipe((0, gulp_rename_1.default)(p => p.dirname = p.dirname.replace(/^extension\/?/, '')))
@@ -417,7 +456,8 @@ function doPackageLocalExtensionsStream(forWeb, disableMangle, native) {
     let result;
     if (forWeb) {
         result = localExtensionsStream;
-    } else {
+    }
+    else {
         // also include shared production node modules
         const productionDependencies = (0, dependencies_1.getProductionDependencies)('extensions/');
         if (productionDependencies.length > 0) {
@@ -425,7 +465,8 @@ function doPackageLocalExtensionsStream(forWeb, disableMangle, native) {
             result = event_stream_1.default.merge(localExtensionsStream, gulp_1.default.src(dependenciesSrc, { base: '.' })
                 .pipe(util2.cleanNodeModules(path_1.default.join(root, 'build', '.moduleignore')))
                 .pipe(util2.cleanNodeModules(path_1.default.join(root, 'build', `.moduleignore.${process.platform}`))));
-        } else {
+        }
+        else {
             result = localExtensionsStream;
         }
     }
@@ -618,4 +659,3 @@ async function buildExtensionMedia(isWatch, outputRoot) {
         outputRoot: outputRoot ? path_1.default.join(root, outputRoot, path_1.default.dirname(p)) : undefined
     })));
 }
-//# sourceMappingURL=extensions.js.map

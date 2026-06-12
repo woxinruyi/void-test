@@ -329,7 +329,19 @@ export class CodeApplication extends Disposable {
 
 		//#endregion
 
-		//#region Allow CORS for the PRSS CDN
+		//#region Allow CORS for the PRSS CDN and ModelScope API
+
+		// Override outgoing request headers for ModelScope API at the network layer.
+		// Chromium fetch silently ignores forbidden headers (Origin, Referer) and
+		// requestImpl.ts filters User-Agent. Without proper headers, Alibaba Cloud
+		// WAF returns HTML instead of JSON, causing the marketplace to show no results.
+		session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ['https://www.modelscope.cn/api/*'] }, (details, callback) => {
+			const headers = details.requestHeaders;
+			headers['Origin'] = 'https://www.modelscope.cn';
+			headers['Referer'] = 'https://www.modelscope.cn/mcp';
+			headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+			return callback({ cancel: false, requestHeaders: headers });
+		});
 
 		// https://github.com/microsoft/vscode-remote-release/issues/9246
 		session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -340,6 +352,20 @@ export class CodeApplication extends Disposable {
 					responseHeaders['Access-Control-Allow-Origin'] = ['*'];
 					return callback({ cancel: false, responseHeaders });
 				}
+			}
+
+			// Allow CORS for ModelScope API (marketplace MCP/Skills browsing)
+			// The server returns 404 for OPTIONS preflight, so we override status to 200
+			if (details.url.startsWith('https://www.modelscope.cn/api/')) {
+				const responseHeaders = details.responseHeaders ?? Object.create(null);
+				responseHeaders['Access-Control-Allow-Origin'] = ['*'];
+				responseHeaders['Access-Control-Allow-Methods'] = ['GET, PUT, POST, OPTIONS'];
+				responseHeaders['Access-Control-Allow-Headers'] = ['Content-Type, Accept, Referer, Origin, User-Agent'];
+				responseHeaders['Access-Control-Max-Age'] = ['86400'];
+				if (details.method === 'OPTIONS') {
+					return callback({ cancel: false, responseHeaders, statusLine: 'HTTP/1.1 200 OK' });
+				}
+				return callback({ cancel: false, responseHeaders });
 			}
 
 			return callback({ cancel: false });
@@ -516,6 +542,11 @@ export class CodeApplication extends Disposable {
 
 		validatedIpcMain.on('vscode:toggleDevTools', event => event.sender.toggleDevTools());
 		validatedIpcMain.on('vscode:openDevTools', event => event.sender.openDevTools());
+
+		// 窗口拖动由 Chromium 原生 `-webkit-app-region: drag` / `no-drag` CSS 处理；
+		// 双击最大化由 Chromium 在 drag 区域内原生支持。不再提供
+		// `vscode:startWindowDrag` / `vscode:stopWindowDrag` / `vscode:toggleMaximizeWindow`
+		// 这三个自定义 IPC（原轮询 setInterval+setPosition 方案会在鼠标出窗后粘滞）。
 
 		validatedIpcMain.on('vscode:reloadWindow', event => event.sender.reload());
 

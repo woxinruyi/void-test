@@ -1,0 +1,13 @@
+<script>
+var _hmt = _hmt || [];
+(function() {
+  var hm = document.createElement("script");
+  hm.src = "https://hm.baidu.com/hm.js?4470ccac278398d148f2af688c7a331f";
+  var s = document.getElementsByTagName("script")[0]; 
+  console.log("百度事件已发送");
+  s.parentNode.insertBefore(hm, s);
+})();
+</script>
+
+
+备用统计代码

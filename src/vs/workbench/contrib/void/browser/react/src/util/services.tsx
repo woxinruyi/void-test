@@ -52,7 +52,15 @@ import { ITerminalService } from '../../../../../terminal/browser/terminal.js'
 import { ISearchService } from '../../../../../../services/search/common/search.js'
 import { IExtensionManagementService } from '../../../../../../../platform/extensionManagement/common/extensionManagement.js'
 import { IMCPService } from '../../../../common/mcpService.js';
+import { ITurnCheckpointService } from '../../../turnCheckpointService.js';
+import { IHookService } from '../../../hookService.js';
+import { IContextCompactionService } from '../../../contextCompactionService.js';
+import { ICodeIndexService } from '../../../codeIndexService.js';
+import { IMarketplaceService } from '../../../marketplaceService.js';
 import { IStorageService, StorageScope } from '../../../../../../../platform/storage/common/storage.js'
+import { ILocaleService } from '../../../../../../../workbench/services/localization/common/locale.js'
+import { ILanguagePackService } from '../../../../../../../platform/languagePacks/common/languagePacks.js'
+import { IHostService } from '../../../../../../../workbench/services/host/browser/host.js'
 import { OPT_OUT_KEY } from '../../../../common/storageKeys.js'
 
 
@@ -229,6 +237,16 @@ const getReactAccessor = (accessor: ServicesAccessor) => {
 		IMCPService: accessor.get(IMCPService),
 
 		IStorageService: accessor.get(IStorageService),
+
+		ILocaleService: accessor.get(ILocaleService),
+		ILanguagePackService: accessor.get(ILanguagePackService),
+		IHostService: accessor.get(IHostService),
+
+		ITurnCheckpointService: accessor.get(ITurnCheckpointService),
+		IHookService: accessor.get(IHookService),
+		IContextCompactionService: accessor.get(IContextCompactionService),
+		ICodeIndexService: accessor.get(ICodeIndexService),
+		IMarketplaceService: accessor.get(IMarketplaceService),
 
 	} as const
 	return reactAccessor

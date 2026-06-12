@@ -11,6 +11,7 @@ import { ButtonStop, ButtonSubmit, IconX, VoidChatArea } from '../sidebar-tsx/Si
 import { VOID_CTRL_K_ACTION_ID } from '../../../actionIDs.js';
 import { useRefState } from '../util/helpers.js';
 import { isFeatureNameDisabled } from '../../../../../../../workbench/contrib/void/common/voidSettingsTypes.js';
+import { t } from '../i18n/index.js';
 
 
 
@@ -118,7 +119,7 @@ export const QuickEditChat = ({
 					})
 				}, [textAreaRef_, onX])}
 				fnsRef={textAreaFnsRef}
-				placeholder="Enter instructions..."
+				placeholder={t('quickEdit.placeholder')}
 				onChangeText={useCallback((newStr: string) => {
 					setInstructionsAreEmpty(!newStr)
 					onChangeText_(newStr)

@@ -25,7 +25,7 @@ import webpack from 'webpack';
 import { getProductionDependencies } from './dependencies';
 import { IExtensionDefinition, getExtensionStream } from './builtInExtensions';
 import { getVersion } from './getVersion';
-import { fetchUrls, fetchGithub } from './fetch';
+import { fetchUrl, fetchUrls, fetchGithub } from './fetch';
 
 const root = path.dirname(path.dirname(__dirname));
 const commit = getVersion(root);
@@ -229,7 +229,12 @@ const baseHeaders = {
 	'X-Market-User-Id': '291C1CD0-051A-4123-9B4B-30D60EF52EE2',
 };
 
-export function fromMarketplace(serviceUrl: string, { name: extensionName, version, sha256, metadata }: IExtensionDefinition): Stream {
+export function fromMarketplace(serviceUrl: string, extension: IExtensionDefinition): Stream {
+	if (extension.downloadUrl) {
+		return fromDownloadUrl(extension);
+	}
+
+	const { name: extensionName, version, sha256, metadata } = extension;
 	const json = require('gulp-json-editor') as typeof import('gulp-json-editor');
 
 	const [publisher, name] = extensionName.split('.');
@@ -246,6 +251,48 @@ export function fromMarketplace(serviceUrl: string, { name: extensionName, versi
 		},
 		checksumSha256: sha256
 	})
+		.pipe(vzip.src())
+		.pipe(filter('extension/**'))
+		.pipe(rename(p => p.dirname = p.dirname!.replace(/^extension\/?/, '')))
+		.pipe(packageJsonFilter)
+		.pipe(buffer())
+		.pipe(json({ __metadata: metadata }))
+		.pipe(packageJsonFilter.restore);
+}
+
+async function resolveExpectedChecksum({ sha256, sha256Url }: IExtensionDefinition): Promise<string | undefined> {
+	if (sha256) {
+		return sha256;
+	}
+
+	if (!sha256Url) {
+		return undefined;
+	}
+
+	const checksumFile = await fetchUrl(sha256Url, {});
+	return checksumFile.contents.toString().trim().split(/\s+/)[0]?.toLowerCase();
+}
+
+export function fromDownloadUrl(extension: IExtensionDefinition): Stream {
+	const json = require('gulp-json-editor') as typeof import('gulp-json-editor');
+	const { name: extensionName, version, downloadUrl, metadata } = extension;
+
+	fancyLog('Downloading extension from URL:', ansiColors.yellow(`${extensionName}@${version}`), '...');
+
+	const packageJsonFilter = filter('package.json', { restore: true });
+
+	return es.readArray([extension])
+		.pipe(es.map<IExtensionDefinition, File | void>((definition, cb) => {
+			(async () => {
+				if (!downloadUrl) {
+					throw new Error(`Missing downloadUrl for built-in extension ${extensionName}@${version}`);
+				}
+
+				const checksumSha256 = await resolveExpectedChecksum(definition);
+				const file = await fetchUrl(downloadUrl, { checksumSha256 });
+				cb(undefined, file);
+			})().catch(error => cb(error));
+		}))
 		.pipe(vzip.src())
 		.pipe(filter('extension/**'))
 		.pipe(rename(p => p.dirname = p.dirname!.replace(/^extension\/?/, '')))

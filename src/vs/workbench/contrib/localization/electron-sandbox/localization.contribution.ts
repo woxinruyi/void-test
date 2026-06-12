@@ -101,10 +101,25 @@ class NativeLocalizationWorkbenchContribution extends BaseLocalizationWorkbenchC
 		if (!this.galleryService.isEnabled()) {
 			return;
 		}
-		if (!language || !locale || platform.Language.isDefaultVariant()) {
+		if (!language || !locale) {
 			return;
 		}
-		if (locale.startsWith(language) || languagePackSuggestionIgnoreList.includes(locale)) {
+		if (languagePackSuggestionIgnoreList.includes(locale)) {
+			return;
+		}
+
+		// If current display language is English (default) but OS locale is non-English,
+		// check if there's an installed/built-in language pack that should be applied.
+		// Built-in language packs don't fire onDidInstallExtensions, so we handle them here.
+		if (platform.Language.isDefaultVariant() && !locale.startsWith('en')) {
+			await this.promptForInstalledLanguagePack(locale);
+			return;
+		}
+
+		if (platform.Language.isDefaultVariant()) {
+			return;
+		}
+		if (locale.startsWith(language)) {
 			return;
 		}
 
@@ -208,6 +223,42 @@ class NativeLocalizationWorkbenchContribution extends BaseLocalizationWorkbenchC
 				onCancel: () => {
 					logUserReaction('cancelled');
 				}
+			}
+		);
+	}
+
+	private async promptForInstalledLanguagePack(locale: string): Promise<void> {
+		const installed = await this.extensionManagementService.getInstalled();
+		const langPackExt = installed.find(i =>
+			!!i.manifest.contributes?.localizations?.length
+			&& i.manifest.contributes.localizations.some(l => locale.startsWith(l.languageId.toLowerCase()))
+		);
+		if (!langPackExt) {
+			return;
+		}
+		const localization = langPackExt.manifest.contributes?.localizations?.find(
+			l => locale.startsWith(l.languageId.toLowerCase())
+		);
+		if (!localization) {
+			return;
+		}
+		const languageName = localization.localizedLanguageName || localization.languageName || localization.languageId;
+		this.notificationService.prompt(
+			Severity.Info,
+			localize('updateLocale', "Would you like to change {0}'s display language to {1} and restart?", this.productService.nameLong, languageName),
+			[{
+				label: localize('changeAndRestart', "Change Language and Restart"),
+				run: async () => {
+					await this.localeService.setLocale({
+						id: localization.languageId,
+						label: languageName,
+						extensionId: langPackExt.identifier.id,
+					}, true);
+				}
+			}],
+			{
+				sticky: true,
+				neverShowAgain: { id: 'langugage.update.donotask', isSecondary: true, scope: NeverShowAgainScope.APPLICATION }
 			}
 		);
 	}

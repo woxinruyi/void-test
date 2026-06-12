@@ -15,6 +15,7 @@ import { separateOutFirstLine } from '../../../../common/helpers/util.js'
 import { BlockCode } from '../util/inputs.js'
 import { CodespanLocationLink } from '../../../../common/chatThreadServiceTypes.js'
 import { getBasename, getRelative, voidOpenFileFn } from '../sidebar-tsx/SidebarChat.js'
+import { t } from '../i18n/index.js'
 
 
 export type ChatMessageLocation = {
@@ -271,20 +272,20 @@ const RenderToken = ({ token, inPTag, codeURI, chatMessageLocation, tokenIdx, ..
 	const languageService = accessor.get('ILanguageService')
 
 	// deal with built-in tokens first (assume marked token)
-	const t = token as MarkedToken
+	const tk = token as MarkedToken
 
-	if (t.raw.trim() === '') {
+	if (tk.raw.trim() === '') {
 		return null;
 	}
 
-	if (t.type === 'space') {
-		return <span>{t.raw}</span>
+	if (tk.type === 'space') {
+		return <span>{tk.raw}</span>
 	}
 
-	if (t.type === 'code') {
-		const [firstLine, remainingContents] = separateOutFirstLine(t.text)
+	if (tk.type === 'code') {
+		const [firstLine, remainingContents] = separateOutFirstLine(tk.text)
 		const firstLineIsURI = isValidUri(firstLine) && !codeURI
-		const contents = firstLineIsURI ? (remainingContents?.trimStart() || '') : t.text // exclude first-line URI from contents
+		const contents = firstLineIsURI ? (remainingContents?.trimStart() || '') : tk.text // exclude first-line URI from contents
 
 		if (!contents) return null
 
@@ -301,15 +302,15 @@ const RenderToken = ({ token, inPTag, codeURI, chatMessageLocation, tokenIdx, ..
 			uri = null
 		}
 
-		if (t.lang) { // a language was provided. empty string is common so check truthy, not just undefined
-			language = convertToVscodeLang(languageService, t.lang) // convert markdown language to language that vscode recognizes (eg markdown doesn't know bash but it does know shell)
+		if (tk.lang) { // a language was provided. empty string is common so check truthy, not just undefined
+			language = convertToVscodeLang(languageService, tk.lang) // convert markdown language to language that vscode recognizes (eg markdown doesn't know bash but it does know shell)
 		}
 		else { // no language provided - fallback - get lang from the uri and contents
 			language = detectLanguage(languageService, { uri, fileContents: contents })
 		}
 
 		if (options.isApplyEnabled && chatMessageLocation) {
-			const isCodeblockClosed = t.raw.trimEnd().endsWith('```') // user should only be able to Apply when the code has been closed (t.raw ends with '```')
+			const isCodeblockClosed = tk.raw.trimEnd().endsWith('```') // user should only be able to Apply when the code has been closed (tk.raw ends with '```')
 
 			const applyBoxId = getApplyBoxId({
 				threadId: chatMessageLocation.threadId,
@@ -336,23 +337,23 @@ const RenderToken = ({ token, inPTag, codeURI, chatMessageLocation, tokenIdx, ..
 		/>
 	}
 
-	if (t.type === 'heading') {
+	if (tk.type === 'heading') {
 
-		const HeadingTag = `h${t.depth}` as keyof JSX.IntrinsicElements
+		const HeadingTag = `h${tk.depth}` as keyof JSX.IntrinsicElements
 
 		return <HeadingTag>
-			<ChatMarkdownRender chatMessageLocation={chatMessageLocation} string={t.text} inPTag={true} codeURI={codeURI} {...options} />
+			<ChatMarkdownRender chatMessageLocation={chatMessageLocation} string={tk.text} inPTag={true} codeURI={codeURI} {...options} />
 		</HeadingTag>
 	}
 
-	if (t.type === 'table') {
+	if (tk.type === 'table') {
 
 		return (
 			<div>
 				<table>
 					<thead>
 						<tr>
-							{t.header.map((h, hIdx: number) => (
+							{tk.header.map((h, hIdx: number) => (
 								<th key={hIdx}>
 									{h.text}
 								</th>
@@ -360,7 +361,7 @@ const RenderToken = ({ token, inPTag, codeURI, chatMessageLocation, tokenIdx, ..
 						</tr>
 					</thead>
 					<tbody>
-						{t.rows.map((row, rowIdx: number) => (
+						{tk.rows.map((row, rowIdx: number) => (
 							<tr key={rowIdx}>
 								{row.map((r, rIdx: number) => (
 									<td key={rIdx} >
@@ -409,29 +410,29 @@ const RenderToken = ({ token, inPTag, codeURI, chatMessageLocation, tokenIdx, ..
 		// )
 	}
 
-	if (t.type === 'hr') {
+	if (tk.type === 'hr') {
 		return <hr />
 	}
 
-	if (t.type === 'blockquote') {
-		return <blockquote>{t.text}</blockquote>
+	if (tk.type === 'blockquote') {
+		return <blockquote>{tk.text}</blockquote>
 	}
 
-	if (t.type === 'list_item') {
+	if (tk.type === 'list_item') {
 		return <li>
-			<input type='checkbox' checked={t.checked} readOnly />
+			<input type='checkbox' checked={tk.checked} readOnly />
 			<span>
-				<ChatMarkdownRender chatMessageLocation={chatMessageLocation} string={t.text} inPTag={true} codeURI={codeURI} {...options} />
+				<ChatMarkdownRender chatMessageLocation={chatMessageLocation} string={tk.text} inPTag={true} codeURI={codeURI} {...options} />
 			</span>
 		</li>
 	}
 
-	if (t.type === 'list') {
-		const ListTag = t.ordered ? 'ol' : 'ul'
+	if (tk.type === 'list') {
+		const ListTag = tk.ordered ? 'ol' : 'ul'
 
 		return (
-			<ListTag start={t.start ? t.start : undefined}>
-				{t.items.map((item, index) => (
+			<ListTag start={tk.start ? tk.start : undefined}>
+				{tk.items.map((item, index) => (
 					<li key={index}>
 						{item.task && (
 							<input type='checkbox' checked={item.checked} readOnly />
@@ -445,10 +446,10 @@ const RenderToken = ({ token, inPTag, codeURI, chatMessageLocation, tokenIdx, ..
 		)
 	}
 
-	if (t.type === 'paragraph') {
+	if (tk.type === 'paragraph') {
 
 		// check for latex
-		const latexSegments = paragraphToLatexSegments(t.raw)
+		const latexSegments = paragraphToLatexSegments(tk.raw)
 		if (latexSegments.length !== 0) {
 			if (inPTag) {
 				return <span className='block'>{latexSegments}</span>;
@@ -458,7 +459,7 @@ const RenderToken = ({ token, inPTag, codeURI, chatMessageLocation, tokenIdx, ..
 
 		// if no latex, default behavior
 		const contents = <>
-			{t.tokens.map((token, index) => (
+			{tk.tokens.map((token, index) => (
 				<RenderToken key={index}
 					token={token}
 					tokenIdx={`${tokenIdx ? `${tokenIdx}-` : ''}${index}`} // assign a unique tokenId to inPTag components
@@ -473,71 +474,71 @@ const RenderToken = ({ token, inPTag, codeURI, chatMessageLocation, tokenIdx, ..
 		return <p>{contents}</p>
 	}
 
-	if (t.type === 'text' || t.type === 'escape' || t.type === 'html') {
-		return <span>{t.raw}</span>
+	if (tk.type === 'text' || tk.type === 'escape' || tk.type === 'html') {
+		return <span>{tk.raw}</span>
 	}
 
-	if (t.type === 'def') {
+	if (tk.type === 'def') {
 		return <></> // Definitions are typically not rendered
 	}
 
-	if (t.type === 'link') {
+	if (tk.type === 'link') {
 		return (
 			<a
-				onClick={() => { window.open(t.href) }}
-				href={t.href}
-				title={t.title ?? undefined}
+				onClick={() => { window.open(tk.href) }}
+				href={tk.href}
+				title={tk.title ?? undefined}
 				className='underline cursor-pointer hover:brightness-90 transition-all duration-200 text-void-fg-2'
 			>
-				{t.text}
+				{tk.text}
 			</a>
 		)
 	}
 
-	if (t.type === 'image') {
+	if (tk.type === 'image') {
 		return <img
-			src={t.href}
-			alt={t.text}
-			title={t.title ?? undefined}
+			src={tk.href}
+			alt={tk.text}
+			title={tk.title ?? undefined}
 
 		/>
 	}
 
-	if (t.type === 'strong') {
-		return <strong>{t.text}</strong>
+	if (tk.type === 'strong') {
+		return <strong>{tk.text}</strong>
 	}
 
-	if (t.type === 'em') {
-		return <em>{t.text}</em>
+	if (tk.type === 'em') {
+		return <em>{tk.text}</em>
 	}
 
 	// inline code
-	if (t.type === 'codespan') {
+	if (tk.type === 'codespan') {
 
 		if (options.isLinkDetectionEnabled && chatMessageLocation) {
 			return <CodespanWithLink
-				text={t.text}
-				rawText={t.raw}
+				text={tk.text}
+				rawText={tk.raw}
 				chatMessageLocation={chatMessageLocation}
 			/>
 
 		}
 
-		return <Codespan text={t.text} />
+		return <Codespan text={tk.text} />
 	}
 
-	if (t.type === 'br') {
+	if (tk.type === 'br') {
 		return <br />
 	}
 
 	// strikethrough
-	if (t.type === 'del') {
-		return <del>{t.text}</del>
+	if (tk.type === 'del') {
+		return <del>{tk.text}</del>
 	}
 	// default
 	return (
 		<div className='bg-orange-50 rounded-sm overflow-hidden p-2'>
-			<span className='text-sm text-orange-500'>Unknown token rendered...</span>
+			<span className='text-sm text-orange-500'>{t('markdown.unknownToken')}</span>
 		</div>
 	)
 }

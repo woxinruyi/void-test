@@ -1,0 +1,117 @@
+schema: spec-driven
+
+# 编码行为指南（Karpathy Guidelines + Void 项目约定）
+# 详见项目根目录 CLAUDE.md — 所有代码生成/编辑必须遵守
+guidelines: CLAUDE.md
+
+context: |
+  语言：中文（简体）
+  所有产出物（proposal.md / design.md / tasks.md / specs/*.md）的正文内容必须使用简体中文撰写。
+  编码行为指南详见项目根目录 CLAUDE.md，涵盖：编码前三思、简洁优先、手术式修改、目标驱动执行。
+
+  命名约定：
+  - 变更文件夹 change id 使用"动词-名词"英文短语（OpenSpec 要求），例如 add-parallel-tools、enhance-agent-prompt
+  - 所有章节标题、段落描述、解释说明一律使用中文
+  - 代码示例、文件路径、变量名、类型名、API 名、包名保留英文（如 TypeScript、Electron、Gulp）
+  - 通用技术术语保留英文（API、MCP、LLM、Agent、SSE、VSCode、NLS）
+
+  项目上下文：
+  - 产品名称：Void（基于 VSCode 源码的 AI 编辑器定制分支）
+  - 目标：发布默认中文的 Windows 桌面 AI 编辑器
+  - 技术栈：
+    - 核心：TypeScript + Electron 33 + VS Code 架构（DI 服务注入）
+    - 构建：Gulp + esbuild + webpack（扩展打包）
+    - 打包：Inno Setup（Windows 安装程序）
+    - AI：多 Provider 支持（OpenAI / Anthropic / Gemini / Ollama）
+    - 工具系统：内建工具 + MCP 外部工具
+    - 通信：Electron IPC（main↔renderer）+ SSE（LLM 流式）
+  - 核心模块：
+    - `src/vs/workbench/contrib/void/common/` — 类型定义、设置服务、Prompt 模板、工具类型
+    - `src/vs/workbench/contrib/void/browser/` — 渲染进程服务（chatThreadService、toolsService、mcpService、convertToLLMMessageService）
+    - `src/vs/workbench/contrib/void/electron-main/` — 主进程服务（sendLLMMessage、voidSCMMainService）
+    - `src/vs/workbench/contrib/void/common/prompt/prompts.ts` — System Prompt + 工具定义
+  - 进程模型约束：
+    - renderer 中不能直接 fetch 跨域 API，需通过 IPC 到 main 进程
+    - 工具执行在 renderer 进程（browser/），LLM 调用在 main 进程（electron-main/）
+    - 服务注册使用 `registerSingleton` + `createDecorator` 模式
+  - 代码风格：
+    - 遵循 VS Code 源码风格：tab 缩进
+    - 新增服务必须声明 interface + decorator + 注册
+    - 优先复用现有服务（ITerminalToolService、IVoidSCMService、IMCPService 等）
+    - 遵循"最小修复优先、避免过度工程"原则（详见 CLAUDE.md）
+
+  文档结构要求：
+  - proposal.md：必须包含"背景 / 目标 / 非目标 / 方案概述 / 影响范围 / 验收标准"
+  - design.md：必须包含"背景、方案、数据流、接口设计、边界情况、回滚策略、风险"
+  - tasks.md：使用 markdown 复选框，按阶段 Phase 1 / 2 / 3 编号，每个任务粒度 ≤ 2 小时
+  - specs/*.md：Delta 规范，标题为 capability 名，每条需求包含 WHEN / THEN 场景
+
+# 项目架构文档维护
+architecture:
+  path: openspec/architecture/
+  description: |
+    持续维护的项目架构知识库，包含项目结构、核心模块、数据流、服务索引等。
+    作为 AI 和开发者理解项目全貌的第一入口。
+  files:
+    - overview.md           # 项目结构 + 核心模块 + 进程模型 + 依赖注入架构
+    - services-index.md     # 服务接口索引 + 文件位置 + 进程归属（main/renderer）
+    - prompt-architecture.md # System Prompt 结构 + 工具定义 + 上下文注入流程
+    - tool-system.md        # 工具系统架构：内建工具 + MCP + 审批流 + 循环检测
+    - build-pipeline.md     # 构建流程：compile → bundle → package → installer
+    - agent-loop.md         # Agent 循环：chatThreadService 状态机 + 并行工具 + 错误恢复
+  maintenance_rules:
+    - 每次通过 archive 归档变更时，检查是否涉及新增/修改模块、服务、Prompt 结构
+    - 如涉及，须同步更新 architecture/ 下对应文件
+    - 新增服务时，在 services-index.md 中补充（标注 interface + 文件路径 + 进程）
+    - 修改 Agent 循环逻辑时，更新 agent-loop.md
+    - 修改 System Prompt 时，更新 prompt-architecture.md
+    - 每次更新须在文件底部"更新日志"表中记录日期、内容和关联变更名
+  read_on:
+    - propose   # 创建新变更提案前，先阅读架构文档以了解现状
+    - explore   # 探索模式下，引用架构文档作为分析基础
+
+# 开发工作流
+dev_workflow:
+  description: |
+    每次代码修改后编译/打包时，必须遵守以下流程。
+  compile_procedure:
+    - step: "TypeScript 全量编译"
+      command: "node ./node_modules/gulp/bin/gulp.js compile-client"
+      success_criteria: "Finished compilation with 0 errors"
+    - step: "打包构建（需要测试时执行）"
+      pre_commands:
+        - "Get-Process -Name 'Void' -ErrorAction SilentlyContinue | Stop-Process -Force"
+        - "Remove-Item 'I:\\自动化执行\\VSCode-win32-x64' -Recurse -Force -ErrorAction SilentlyContinue"
+      command: "node ./node_modules/gulp/bin/gulp.js vscode-win32-x64"
+      post_commands:
+        - "New-Item -ItemType Directory -Path 'I:\\自动化执行\\VSCode-win32-x64\\tools' -Force"
+        - "Copy-Item 'build\\win32\\inno_updater.exe' 'I:\\自动化执行\\VSCode-win32-x64\\tools\\'"
+        - "Copy-Item 'build\\win32\\vcruntime140.dll' 'I:\\自动化执行\\VSCode-win32-x64\\tools\\'"
+    - step: "启动测试"
+      command: "Start-Process 'I:\\自动化执行\\VSCode-win32-x64\\Void.exe'"
+  installer:
+    command: "node ./node_modules/gulp/bin/gulp.js vscode-win32-x64-user-setup"
+    output: "I:\\自动化执行\\void-main\\.build\\win32-x64\\user-setup\\VoidUserSetup-x64.exe"
+
+# 每个产出物的附加规则
+rules:
+  proposal:
+    - 使用简体中文撰写正文
+    - 必须包含"非目标（Non-goals）"一节，说明本次变更不做什么
+    - 必须包含"验收标准"一节，定义可验证的完成条件
+    - 不超过 800 字
+  design:
+    - 使用简体中文撰写正文
+    - 必须说明与现有模块/服务的关系（复用/扩展/替换）
+    - 必须标注涉及的进程（main/renderer/both）
+    - 必须列出技术风险与回滚策略
+    - 涉及 Prompt 修改时，必须估算 token 增量
+  tasks:
+    - 使用简体中文撰写正文
+    - 使用 markdown 复选框 `- [ ]`
+    - 按阶段编号 Phase 1 / 2 / 3
+    - 每个任务粒度应 ≤ 2 小时
+    - 每个 Phase 末尾必须有"编译验证 0 errors"任务
+  spec:
+    - specs/ 下规格文档使用简体中文撰写需求与验收场景（Scenario）
+    - 每条需求包含 WHEN / THEN 格式的验证场景

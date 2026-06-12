@@ -18,19 +18,21 @@ import { Stream } from 'stream';
 export interface IExtensionDefinition {
 	name: string;
 	version: string;
-	sha256: string;
-	repo: string;
+	sha256?: string;
+	sha256Url?: string;
+	repo?: string;
 	platforms?: string[];
 	vsix?: string;
-	metadata: {
-		id: string;
-		publisherId: {
-			publisherId: string;
-			publisherName: string;
-			displayName: string;
-			flags: string;
+	downloadUrl?: string;
+	metadata?: {
+		id?: string;
+		publisherId?: {
+			publisherId?: string;
+			publisherName?: string;
+			displayName?: string;
+			flags?: string;
 		};
-		publisherDisplayName: string;
+		publisherDisplayName?: string;
 	};
 }
 
@@ -71,7 +73,9 @@ function isUpToDate(extension: IExtensionDefinition): boolean {
 function getExtensionDownloadStream(extension: IExtensionDefinition) {
 	let input: Stream;
 
-	if (extension.vsix) {
+	if (extension.downloadUrl) {
+		input = ext.fromDownloadUrl(extension);
+	} else if (extension.vsix) {
 		input = ext.fromVsix(path.join(root, extension.vsix), extension);
 	} else if (productjson.extensionsGallery?.serviceUrl) {
 		input = ext.fromMarketplace(productjson.extensionsGallery.serviceUrl, extension);

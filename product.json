@@ -1,8 +1,16 @@
 {
 	"nameShort": "Void",
 	"nameLong": "Void",
+	"companyName": "Void",
+	"win32PublisherName": "Void",
+	"win32PublisherUrl": "https://voideditor.com/",
+	"win32SupportUrl": "https://github.com/voideditor/void/issues",
+	"win32UpdatesUrl": "https://voideditor.com/",
+	"win32SetupBaseFilename": "VoidUserSetup-x64",
+	"win32LegalCopyright": "Copyright (C) 2025 Glass Devtools, Inc. All rights reserved.",
 	"voidVersion": "1.4.9",
 	"voidRelease": "0044",
+	"defaultLocale": "zh-cn",
 	"applicationName": "void",
 	"dataFolderName": ".void-editor",
 	"win32MutexName": "voideditor",
@@ -36,7 +44,28 @@
 		"serviceUrl": "https://marketplace.visualstudio.com/_apis/public/gallery",
 		"itemUrl": "https://marketplace.visualstudio.com/items"
 	},
-	"builtInExtensions": [],
+	"builtInExtensions": [
+		{
+			"name": "ms-ceintl.vscode-language-pack-zh-hans",
+			"version": "1.99.0",
+			"downloadUrl": "https://open-vsx.org/api/MS-CEINTL/vscode-language-pack-zh-hans/1.99.0/file/MS-CEINTL.vscode-language-pack-zh-hans-1.99.0.vsix",
+			"sha256Url": "https://open-vsx.org/api/MS-CEINTL/vscode-language-pack-zh-hans/1.99.0/file/MS-CEINTL.vscode-language-pack-zh-hans-1.99.0.sha256",
+			"metadata": {
+				"id": "ms-ceintl.vscode-language-pack-zh-hans",
+				"publisherDisplayName": "Microsoft"
+			}
+		},
+		{
+			"name": "ms-ceintl.vscode-language-pack-ko",
+			"version": "1.99.0",
+			"downloadUrl": "https://open-vsx.org/api/MS-CEINTL/vscode-language-pack-ko/1.99.0/file/MS-CEINTL.vscode-language-pack-ko-1.99.0.vsix",
+			"sha256Url": "https://open-vsx.org/api/MS-CEINTL/vscode-language-pack-ko/1.99.0/file/MS-CEINTL.vscode-language-pack-ko-1.99.0.sha256",
+			"metadata": {
+				"id": "ms-ceintl.vscode-language-pack-ko",
+				"publisherDisplayName": "Microsoft"
+			}
+		}
+	],
 	"linkProtectionTrustedDomains": [
 		"https://voideditor.com",
 		"https://voideditor.dev",

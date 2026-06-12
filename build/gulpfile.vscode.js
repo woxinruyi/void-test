@@ -456,11 +456,11 @@ function patchWin32DependenciesTask(destinationFolderName) {
 				await rcedit(path.join(cwd, dep), {
 					'file-version': baseVersion,
 					'version-string': {
-						'CompanyName': 'Microsoft Corporation',
+						'CompanyName': product.companyName || product.nameLong,
 						'FileDescription': product.nameLong,
 						'FileVersion': packageJson.version,
 						'InternalName': basename,
-						'LegalCopyright': 'Copyright (C) 2022 Microsoft. All rights reserved',
+						'LegalCopyright': product.win32LegalCopyright || '',
 						'OriginalFilename': basename,
 						'ProductName': product.nameLong,
 						'ProductVersion': packageJson.version,
@@ -470,6 +470,31 @@ function patchWin32DependenciesTask(destinationFolderName) {
 				console.warn(`Warning: Failed to patch ${dep}: ${err.message}`);
 			}
 		}));
+	};
+}
+
+function patchWin32ExecutableTask(destinationFolderName) {
+	const cwd = path.join(path.dirname(root), destinationFolderName);
+
+	return async () => {
+		const executablePath = path.join(cwd, `${product.nameShort}.exe`);
+		const packageJson = JSON.parse(await fs.promises.readFile(path.join(cwd, 'resources', 'app', 'package.json'), 'utf8'));
+		const productJson = JSON.parse(await fs.promises.readFile(path.join(cwd, 'resources', 'app', 'product.json'), 'utf8'));
+		const baseVersion = packageJson.version.replace(/-.*$/, '');
+
+		await rcedit(executablePath, {
+			'file-version': baseVersion,
+			'version-string': {
+				'CompanyName': productJson.companyName || productJson.nameLong,
+				'FileDescription': productJson.nameLong,
+				'FileVersion': packageJson.version,
+				'InternalName': `${productJson.nameShort}.exe`,
+				'LegalCopyright': productJson.win32LegalCopyright || '',
+				'OriginalFilename': `${productJson.nameShort}.exe`,
+				'ProductName': productJson.nameLong,
+				'ProductVersion': packageJson.version,
+			}
+		});
 	};
 }
 
@@ -501,6 +526,7 @@ BUILD_TARGETS.forEach(buildTarget => {
 		];
 
 		if (platform === 'win32') {
+			tasks.push(patchWin32ExecutableTask(destinationFolderName));
 			tasks.push(patchWin32DependenciesTask(destinationFolderName));
 		}
 

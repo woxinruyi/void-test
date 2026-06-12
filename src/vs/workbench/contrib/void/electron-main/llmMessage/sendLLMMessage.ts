@@ -24,6 +24,7 @@ export const sendLLMMessage = async ({
 	chatMode,
 	separateSystemMessage,
 	mcpTools,
+	promptCaching,
 }: SendLLMMessageParams,
 
 	metricsService: IMetricsService
@@ -66,9 +67,9 @@ export const sendLLMMessage = async ({
 	}
 
 	const onFinalMessage: OnFinalMessage = (params) => {
-		const { fullText, fullReasoning, toolCall } = params
+		const { fullText, fullReasoning, toolCall, toolCalls } = params
 		if (_didAbort) return
-		captureLLMEvent(`${loggingName} - Received Full Message`, { messageLength: fullText.length, reasoningLength: fullReasoning?.length, duration: new Date().getMilliseconds() - submit_time.getMilliseconds(), toolCallName: toolCall?.name })
+		captureLLMEvent(`${loggingName} - Received Full Message`, { messageLength: fullText.length, reasoningLength: fullReasoning?.length, duration: new Date().getMilliseconds() - submit_time.getMilliseconds(), toolCallName: toolCall?.name, parallelToolCount: toolCalls?.length ?? (toolCall ? 1 : 0) })
 		onFinalMessage_(params)
 	}
 
@@ -108,7 +109,7 @@ export const sendLLMMessage = async ({
 		}
 		const { sendFIM, sendChat } = implementation
 		if (messagesType === 'chatMessages') {
-			await sendChat({ messages: messages_, onText, onFinalMessage, onError, settingsOfProvider, modelSelectionOptions, overridesOfModel, modelName, _setAborter, providerName, separateSystemMessage, chatMode, mcpTools })
+			await sendChat({ messages: messages_, onText, onFinalMessage, onError, settingsOfProvider, modelSelectionOptions, overridesOfModel, modelName, _setAborter, providerName, separateSystemMessage, chatMode, mcpTools, promptCaching })
 			return
 		}
 		if (messagesType === 'FIMMessage') {

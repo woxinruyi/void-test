@@ -242,7 +242,7 @@ registerAction2(class extends Action2 {
 			id: 'void.settingsAction',
 			title: `Void's Settings`,
 			icon: { id: 'settings-gear' },
-			menu: [{ id: MenuId.ViewTitle, group: 'navigation', when: ContextKeyExpr.equals('view', VOID_VIEW_ID), }]
+			menu: []
 		});
 	}
 	async run(accessor: ServicesAccessor): Promise<void> {

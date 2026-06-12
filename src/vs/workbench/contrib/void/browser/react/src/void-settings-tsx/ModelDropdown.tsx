@@ -13,6 +13,7 @@ import { VOID_OPEN_SETTINGS_ACTION_ID, VOID_TOGGLE_SETTINGS_ACTION_ID } from '..
 import { modelFilterOfFeatureName, ModelOption } from '../../../../../../../workbench/contrib/void/common/voidSettingsService.js'
 import { WarningBox } from './WarningBox.js'
 import ErrorBoundary from '../sidebar-tsx/ErrorBoundary.js'
+import { t } from '../i18n/index.js'
 
 const optionsEqual = (m1: ModelOption[], m2: ModelOption[]) => {
 	if (m1.length !== m2.length) return false
@@ -65,7 +66,7 @@ const MemoizedModelDropdown = ({ featureName, className }: { featureName: Featur
 	}, [settingsState._modelOptions, filter])
 
 	if (memoizedOptions.length === 0) { // Pretty sure this will never be reached unless filter is enabled
-		return <WarningBox text={emptyMessage?.message || 'No models available'} />
+		return <WarningBox textKey='warnings.noModelsAvailable' />
 	}
 
 	return <ModelSelectBox featureName={featureName} options={memoizedOptions} className={className} />
@@ -84,14 +85,17 @@ export const ModelDropdown = ({ featureName, className }: { featureName: Feature
 	const { emptyMessage } = modelFilterOfFeatureName[featureName]
 
 	const isDisabled = isFeatureNameDisabled(featureName, settingsState)
-	if (isDisabled)
-		return <WarningBox onClick={openSettings} text={
-			emptyMessage && emptyMessage.priority === 'always' ? emptyMessage.message :
-				isDisabled === 'needToEnableModel' ? 'Enable a model'
-					: isDisabled === 'addModel' ? 'Add a model'
-						: (isDisabled === 'addProvider' || isDisabled === 'notFilledIn' || isDisabled === 'providerNotAutoDetected') ? 'Provider required'
-							: 'Provider required'
-		} />
+	if (isDisabled) {
+		const warningKey = (emptyMessage && emptyMessage.priority === 'always') ? undefined
+			: isDisabled === 'needToEnableModel' ? 'warnings.enableModel' as const
+			: isDisabled === 'addModel' ? 'warnings.addModel' as const
+			: 'warnings.providerRequired' as const
+
+		return <WarningBox onClick={openSettings}
+			text={warningKey ? undefined : emptyMessage?.message}
+			textKey={warningKey}
+		/>
+	}
 
 	return <ErrorBoundary>
 		<MemoizedModelDropdown featureName={featureName} className={className} />

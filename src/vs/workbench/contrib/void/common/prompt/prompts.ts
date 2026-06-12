@@ -9,8 +9,8 @@ import { IDirectoryStrService } from '../directoryStrService.js';
 import { StagingSelectionItem } from '../chatThreadServiceTypes.js';
 import { os } from '../helpers/systemInfo.js';
 import { RawToolParamsObj } from '../sendLLMMessageTypes.js';
-import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, BuiltinToolName, BuiltinToolResultType, ToolName } from '../toolsServiceTypes.js';
-import { ChatMode } from '../voidSettingsTypes.js';
+import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, BuiltinToolName, ToolName } from '../toolsServiceTypes.js';
+import { ChatMode, SkillInfo } from '../voidSettingsTypes.js';
 
 // Triple backtick wrapper used throughout the prompts for code blocks
 export const tripleTick = ['```', '```']
@@ -21,12 +21,12 @@ export const MAX_DIRSTR_CHARS_TOTAL_TOOL = 20_000
 export const MAX_DIRSTR_RESULTS_TOTAL_BEGINNING = 100
 export const MAX_DIRSTR_RESULTS_TOTAL_TOOL = 100
 
-// tool info
-export const MAX_FILE_CHARS_PAGE = 500_000
+// tool info - P0-3: 降低上限避免上下文溢出（参考 Codex CLI 的 10K token 策略）
+export const MAX_FILE_CHARS_PAGE = 40_000      // ~10K token（原 500_000）
 export const MAX_CHILDREN_URIs_PAGE = 500
 
-// terminal tool info
-export const MAX_TERMINAL_CHARS = 100_000
+// terminal tool info - P0-3: 降低终端输出上限
+export const MAX_TERMINAL_CHARS = 20_000       // ~5K token（原 100_000）
 export const MAX_TERMINAL_INACTIVE_TIME = 8 // seconds
 export const MAX_TERMINAL_BG_COMMAND_TIME = 5
 
@@ -38,6 +38,21 @@ export const MAX_PREFIX_SUFFIX_CHARS = 20_000
 export const ORIGINAL = `<<<<<<< ORIGINAL`
 export const DIVIDER = `=======`
 export const FINAL = `>>>>>>> UPDATED`
+
+/**
+ * P0-3: 中间截断策略 - 保留首尾，中间用省略号代替
+ * 参考 Codex CLI 的截断策略，避免丢失开头或结尾的关键信息
+ */
+export function truncateMiddle(text: string, maxChars: number): string {
+	if (text.length <= maxChars) return text;
+
+	const half = Math.floor(maxChars / 2);
+	const truncatedCount = text.length - maxChars;
+
+	return text.slice(0, half)
+		+ `\n\n... (${truncatedCount} characters truncated) ...\n\n`
+		+ text.slice(-half);
+}
 
 
 
@@ -149,6 +164,8 @@ export type InternalToolInfo = {
 	},
 	// Only if the tool is from an MCP server
 	mcpServerName?: string,
+	// Optional: usage examples and tips for the LLM
+	examples?: string[],
 }
 
 
@@ -189,6 +206,7 @@ export const builtinTools: {
 		description: string;
 		// more params can be generated than exist here, but these params must be a subset of them
 		params: Partial<{ [paramName in keyof SnakeCaseKeys<BuiltinToolCallParams[T]>]: { description: string } }>
+		examples?: string[];
 	}
 } = {
 	// --- context-gathering (read/search/list) ---
@@ -240,6 +258,11 @@ export const builtinTools: {
 	search_for_files: {
 		name: 'search_for_files',
 		description: `Returns a list of file names whose content matches the given query. The query can be any substring or regex.`,
+		examples: [
+			'Prefer this over reading many files one-by-one when locating where a symbol or string is used.',
+			'Use include_pattern (e.g. "**/*.ts") to narrow results when the workspace is large.',
+			'For natural-language/semantic concepts, prefer semantic_search; this tool is for exact substring/regex.',
+		],
 		params: {
 			query: { description: `Your query for the search.` },
 			search_in_folder: { description: 'Optional. Leave as blank by default. ONLY fill this in if your previous search with the same query was truncated. Searches descendants of this folder only.' },
@@ -293,6 +316,18 @@ export const builtinTools: {
 			...uriParam('file'),
 			search_replace_blocks: { description: replaceTool_description }
 		},
+		examples: [
+			'If old_str is not found, re-read the file to get exact current content before retrying.',
+			'Include enough surrounding context in old_str to make it unique in the file.',
+		],
+	},
+
+	batch_edit: {
+		name: 'batch_edit',
+		description: `Edit multiple files in a single tool call. Each edit uses the same SEARCH/REPLACE block format as edit_file. Use this when you need to make coordinated changes across several files (e.g., renaming a symbol, updating imports, refactoring). The edits parameter is a JSON array of objects, each with "uri" (full file path) and "search_replace_blocks" (the SEARCH/REPLACE string).`,
+		params: {
+			edits: { description: `A JSON array of edit objects. Each object must have: "uri" (full path to the file) and "search_replace_blocks" (the SEARCH/REPLACE block string, same format as edit_file).` },
+		},
 	},
 
 	rewrite_file: {
@@ -302,6 +337,10 @@ export const builtinTools: {
 			...uriParam('file'),
 			new_content: { description: `The new contents of the file. Must be a string.` }
 		},
+		examples: [
+			'Use rewrite_file for newly created files or when >50% of content needs to change.',
+			'Prefer edit_file for small targeted changes in existing large files.',
+		],
 	},
 	run_command: {
 		name: 'run_command',
@@ -310,6 +349,11 @@ export const builtinTools: {
 			command: { description: 'The terminal command to run.' },
 			cwd: { description: cwdHelper },
 		},
+		examples: [
+			'Always provide cwd as the full workspace path to avoid running in wrong directory.',
+			'If a command fails, read error output and fix the issue before retrying.',
+			'Use this to verify changes: run build, lint, or test commands after edits.',
+		],
 	},
 
 	run_persistent_command: {
@@ -336,13 +380,181 @@ export const builtinTools: {
 		name: 'kill_persistent_terminal',
 		description: `Interrupts and closes a persistent terminal that you opened with open_persistent_terminal.`,
 		params: { persistent_terminal_id: { description: `The ID of the persistent terminal.` } }
-	}
+	},
 
+	// --- lsp navigation ---
 
-	// go_to_definition
-	// go_to_usages
+	go_to_definition: {
+		name: 'go_to_definition',
+		description: `Navigates to the definition of the symbol at the given position in a file. Returns the file path, line range, and a code snippet of each definition. Use this to understand where a function, variable, or type is defined.`,
+		params: {
+			...uriParam('file'),
+			line: { description: 'The 1-based line number of the symbol to find the definition for.' },
+			character: { description: 'The 1-based column number (character offset) of the symbol.' },
+		},
+	},
 
-} satisfies { [T in keyof BuiltinToolResultType]: InternalToolInfo }
+	find_references: {
+		name: 'find_references',
+		description: `Finds all references to the symbol at the given position across the workspace. Returns file paths, line numbers, and code snippets for each reference. Use this to understand how a symbol is used throughout the codebase.`,
+		params: {
+			...uriParam('file'),
+			line: { description: 'The 1-based line number of the symbol.' },
+			character: { description: 'The 1-based column number (character offset) of the symbol.' },
+			include_declaration: { description: 'Optional. Whether to include the symbol declaration in the results. Default is true.' },
+		},
+	},
+
+	get_type_definition: {
+		name: 'get_type_definition',
+		description: `Navigates to the type definition of the symbol at the given position. Returns the file path, line range, and code snippet of the type definition. Use this to find the type/interface definition of a variable or parameter.`,
+		params: {
+			...uriParam('file'),
+			line: { description: 'The 1-based line number of the symbol.' },
+			character: { description: 'The 1-based column number (character offset) of the symbol.' },
+		},
+	},
+
+	list_symbols: {
+		name: 'list_symbols',
+		description: `Lists symbols in a file (document symbols) or searches for symbols across the workspace by name (workspace symbols). When uri is provided, returns the document outline (functions, classes, variables, etc.) of that file. When query is provided without uri, searches for workspace symbols matching the query. Use this to quickly understand a file structure or find symbols by name across the codebase.`,
+		params: {
+			uri: { description: 'Optional. The FULL path to the file to list document symbols for. Leave empty to search workspace symbols instead.' },
+			query: { description: 'Optional. The search query for workspace symbol search. Only used when uri is not provided.' },
+		},
+	},
+
+	find_implementations: {
+		name: 'find_implementations',
+		description: `Finds all implementations of the symbol at the given position. Returns file paths, line ranges, and code snippets for each implementation. Use this to find concrete implementations of an interface or abstract class.`,
+		params: {
+			...uriParam('file'),
+			line: { description: 'The 1-based line number of the symbol.' },
+			character: { description: 'The 1-based column number (character offset) of the symbol.' },
+		},
+	},
+
+	// --- semantic search ---
+
+	semantic_search: {
+		name: 'semantic_search',
+		description: `Search your codebase using natural language. Unlike search_for_files which matches exact strings or regex, this tool understands the semantic meaning of your query and returns the most relevant code blocks. Use this when you want to find code related to a concept (e.g., "authentication flow", "error handling", "database connection") rather than a specific string. Requires the code index to be built (index status must be "ready").`,
+		params: {
+			query: { description: 'Your search query in natural language. Describe what you are looking for conceptually.' },
+			max_results: { description: 'Optional. Maximum number of results to return. Default is 10, maximum is 20.' },
+			search_in_folder: { description: 'Optional. The FULL path to a folder to limit search to its descendants.' },
+		},
+	},
+
+	// --- planning ---
+
+	update_plan: {
+		name: 'update_plan',
+		description: `Create or update a task plan (todo list) to track your work. Use this to organize multi-step tasks, mark progress, and keep the user informed of your plan. Call this at the start of complex tasks to outline your approach, and update it as you complete steps. Each todo item has a content description, status (pending/in_progress/completed), and priority (high/medium/low). You can provide an id to update existing items or omit it to create new ones.`,
+		params: {
+			title: { description: 'Optional. Title of the plan. Only needed when creating a new plan or renaming.' },
+			todos: { description: 'JSON array of todo items. Each item: { "id": "optional-existing-id", "content": "task description", "status": "pending|in_progress|completed", "priority": "high|medium|low" }. Provide the COMPLETE list of todos (existing + new). Items not included will be removed.' },
+		},
+	},
+
+	// --- memories ---
+
+	save_memory: {
+		name: 'save_memory',
+		description: `Save an important piece of information to persistent memory. Use this to remember user preferences, project conventions, key architectural decisions, important context, or anything that should persist across conversations. Memories are stored in the workspace and injected into future system prompts. To update an existing memory, provide its id. Keep memories concise and factual.`,
+		params: {
+			content: { description: 'The memory content to save. Keep it concise and factual.' },
+			tags: { description: 'Optional. Comma-separated tags for categorization (e.g., "preference,style" or "architecture,backend").' },
+			existing_id: { description: 'Optional. ID of an existing memory to update instead of creating a new one.' },
+		},
+	},
+
+	delete_memory: {
+		name: 'delete_memory',
+		description: `Delete a memory by its ID. Use this to remove outdated or incorrect memories.`,
+		params: {
+			id: { description: 'The ID of the memory to delete.' },
+		},
+	},
+
+	// --- web search ---
+
+	web_search: {
+		name: 'web_search',
+		description: `Search the web for information. Use this when you need up-to-date information, documentation, API references, or answers to questions that require internet access. Returns a list of relevant web pages with titles, URLs, and snippets.`,
+		params: {
+			query: { description: 'The search query. Be specific and include relevant keywords.' },
+			max_results: { description: 'Optional. Maximum number of results to return. Default is 10.' },
+		},
+	},
+
+	read_url: {
+		name: 'read_url',
+		description: `Fetch and read the text content of a web page or URL. Use this to read documentation, API references, blog posts, or any web page. The HTML is converted to plain text. Content is truncated at 50,000 characters. Use web_search first to find relevant URLs, then read_url to get the full content.`,
+		params: {
+			url: { description: 'The full URL to read (must start with http:// or https://).' },
+		},
+	},
+
+	// --- remote index ---
+
+	remote_repo_tree: {
+		name: 'remote_repo_tree',
+		description: `Get the file tree of a remote GitHub repository. Returns a list of all file paths in the repository. Use this to explore the structure of external repositories referenced in the project (e.g., dependencies, upstream forks). Results are cached for 30 minutes.`,
+		params: {
+			owner: { description: 'GitHub repository owner (e.g., "microsoft").' },
+			repo: { description: 'GitHub repository name (e.g., "vscode").' },
+			branch: { description: 'Optional. Branch name. Default is "main".' },
+		},
+	},
+
+	remote_repo_read: {
+		name: 'remote_repo_read',
+		description: `Read a file from a remote GitHub repository. Returns the file content (truncated at 100K characters). Use remote_repo_tree first to find the file path, then use this to read it.`,
+		params: {
+			owner: { description: 'GitHub repository owner.' },
+			repo: { description: 'GitHub repository name.' },
+			path: { description: 'File path within the repository (e.g., "src/index.ts").' },
+			branch: { description: 'Optional. Branch name. Default is "main".' },
+		},
+	},
+
+	remote_repo_search: {
+		name: 'remote_repo_search',
+		description: `Search for code in a remote GitHub repository. Uses GitHub code search API. Returns matching file paths with code snippets. Falls back to filename matching if API search fails.`,
+		params: {
+			owner: { description: 'GitHub repository owner.' },
+			repo: { description: 'GitHub repository name.' },
+			query: { description: 'Search query (code text or filename pattern).' },
+			branch: { description: 'Optional. Branch name. Default is "main".' },
+		},
+	},
+
+	// --- subagents ---
+
+	dispatch_agents: {
+		name: 'dispatch_agents',
+		description: `Dispatch multiple parallel search/read sub-tasks to explore the codebase simultaneously. This is much faster than calling search tools one at a time. Use this when you need to gather information from multiple files or run multiple searches at once. Each task runs independently and results are aggregated. Supported task types: "grep" (text search), "read_file" (read file contents), "semantic_search" (semantic code search), "list_symbols" (find symbols in a file). Maximum 10 tasks per dispatch.`,
+		params: {
+			tasks: { description: 'JSON array of tasks. Each task: { "id": "unique-id", "type": "grep|read_file|semantic_search|list_symbols", "description": "what this task does", "params": { ... type-specific params } }. For grep: { "type": "grep", "query": "search text", "includePattern": "*.ts", "searchInFolder": "/path" }. For read_file: { "type": "read_file", "filePath": "/path/to/file", "startLine": 1, "endLine": 50 }. For semantic_search: { "type": "semantic_search", "query": "concept to find", "maxResults": 5 }. For list_symbols: { "type": "list_symbols", "filePath": "/path/to/file", "query": "optional filter" }.' },
+		},
+	},
+
+	// --- task completion ---
+
+	attempt_completion: {
+		name: 'attempt_completion',
+		description: `Explicitly signal that you have completed the user's task. Use this tool when you believe the task is finished and no more actions are needed. This helps provide a clear summary of what was accomplished and allows the user to verify the result. Only call this when: (1) all requested changes have been made, (2) verification has been performed if applicable, (3) you are confident the task is complete. If there are remaining issues or uncertainties, mention them in the summary.`,
+		params: {
+			summary: { description: 'A concise summary of what was accomplished. Include: (1) what changes were made, (2) how the changes were verified, (3) any remaining notes or follow-up suggestions.' },
+			verification_status: { description: 'Optional. Status of verification: "passed", "skipped", "partial", or "failed". If failed, explain in the summary.' },
+		},
+		examples: [
+			'<attempt_completion>\n<summary>Implemented user authentication:\n1. Added login/logout endpoints in auth.ts\n2. Created JWT middleware in middleware/auth.ts\n3. Verified: npm run lint passed, manual API test successful</summary>\n<verification_status>passed</verification_status>\n</attempt_completion>',
+		],
+	},
+
+}
 
 
 
@@ -380,12 +592,13 @@ export const availableTools = (chatMode: ChatMode | null, mcpTools: InternalTool
 const toolCallDefinitionsXMLString = (tools: InternalToolInfo[]) => {
 	return `${tools.map((t, i) => {
 		const params = Object.keys(t.params).map(paramName => `<${paramName}>${t.params[paramName].description}</${paramName}>`).join('\n')
+		const tips = t.examples && t.examples.length > 0 ? `\n    Tips: ${t.examples.join(' | ')}` : ''
 		return `\
     ${i + 1}. ${t.name}
     Description: ${t.description}
     Format:
     <${t.name}>${!params ? '' : `\n${params}`}
-    </${t.name}>`
+    </${t.name}>${tips}`
 	}).join('\n\n')}`
 }
 
@@ -425,7 +638,7 @@ const systemToolsXMLPrompt = (chatMode: ChatMode, mcpTools: InternalToolInfo[] |
 // ======================================================== chat (normal, gather, agent) ========================================================
 
 
-export const chat_systemMessage = ({ workspaceFolders, openedURIs, activeURI, persistentTerminalIDs, directoryStr, chatMode: mode, mcpTools, includeXMLToolDefinitions }: { workspaceFolders: string[], directoryStr: string, openedURIs: string[], activeURI: string | undefined, persistentTerminalIDs: string[], chatMode: ChatMode, mcpTools: InternalToolInfo[] | undefined, includeXMLToolDefinitions: boolean }) => {
+export const chat_systemMessage = ({ workspaceFolders, openedURIs, activeURI, persistentTerminalIDs, directoryStr, chatMode: mode, mcpTools, includeXMLToolDefinitions, recentlyModifiedFiles, currentPlanSummary, memoriesSummary, ideActivitySummary, installedSkills, gitStatusSummary, projectStackSummary, recentErrorsSummary }: { workspaceFolders: string[], directoryStr: string, openedURIs: string[], activeURI: string | undefined, persistentTerminalIDs: string[], chatMode: ChatMode, mcpTools: InternalToolInfo[] | undefined, includeXMLToolDefinitions: boolean, recentlyModifiedFiles?: string[], currentPlanSummary?: string, memoriesSummary?: string, ideActivitySummary?: string, installedSkills?: SkillInfo[], gitStatusSummary?: string, projectStackSummary?: string, recentErrorsSummary?: string }) => {
 	const header = (`You are an expert coding ${mode === 'agent' ? 'agent' : 'assistant'} whose job is \
 ${mode === 'agent' ? `to help the user develop, run, and make changes to their codebase.`
 			: mode === 'gather' ? `to search, understand, and reference files in the user's codebase.`
@@ -468,7 +681,14 @@ ${directoryStr}
 	if (mode === 'agent' || mode === 'gather') {
 		details.push(`Only call tools if they help you accomplish the user's goal. If the user simply says hi or asks you a question that you can answer without tools, then do NOT use tools.`)
 		details.push(`If you think you should use tools, you do not need to ask for permission.`)
-		details.push('Only use ONE tool call at a time.')
+		// P0-1: Agent 模式支持并行工具调用，gather 模式保持单工具
+		if (mode === 'gather') {
+			details.push('Only use ONE tool call at a time.')
+		} else {
+			details.push('When multiple independent tool calls can be parallelized (e.g., reading multiple files, multiple searches), issue them together in a single response.')
+			details.push('Workflow for exploration: (a) Think first - decide ALL files/resources you need (b) Issue one parallel batch (c) Analyze results (d) Repeat if new reads arise')
+			details.push('Only make sequential tool calls if you truly cannot know the next file without seeing the result of the previous call.')
+		}
 		details.push(`NEVER say something like "I'm going to use \`tool_name\`". Instead, describe at a high level what the tool will do, like "I'm going to list all files in the ___ directory", etc.`)
 		details.push(`Many tools only work if the user has a workspace open.`)
 	}
@@ -482,6 +702,10 @@ ${directoryStr}
 		details.push(`You will OFTEN need to gather context before making a change. Do not immediately make a change unless you have ALL relevant context.`)
 		details.push(`ALWAYS have maximal certainty in a change BEFORE you make it. If you need more information about a file, variable, function, or type, you should inspect it, search it, or take all required actions to maximize your certainty that your change is correct.`)
 		details.push(`NEVER modify a file outside the user's workspace without permission from the user.`)
+		details.push(`CRITICAL: You MUST ONLY use the exact tool names provided to you. Do NOT invent tool names like "write_to_file", "create_file", "write_file", "bash", etc. Use ONLY the tools listed above. For creating files use "create_file_or_folder" then "rewrite_file". For editing files use "edit_file". For running commands use "run_command".`)
+		details.push(`CRITICAL: All file paths in tool parameters MUST be FULL ABSOLUTE paths (e.g. "${workspaceFolders?.[0] ?? '/workspace'}/src/file.ts"), never relative paths like "file.ts" or "src/file.ts".`)
+		// P0-2: 防止循环和过早停止
+		details.push(`Avoid excessive looping: if you find yourself re-reading or re-editing the same files without clear progress, STOP and end the turn with a concise summary and targeted questions.`)
 	}
 
 	if (mode === 'gather') {
@@ -512,10 +736,168 @@ Here's an example of a good code block:\n${chatSuggestionDiffExample}`)
 ${details.map((d, i) => `${i + 1}. ${d}`).join('\n\n')}`)
 
 
+	const activeContextInfo = recentlyModifiedFiles && recentlyModifiedFiles.length > 0
+		? `Recently modified files (unsaved changes):
+<recently_modified>
+${recentlyModifiedFiles.join('\n')}
+</recently_modified>`
+		: null
+
+	const planInfo = currentPlanSummary
+		? `Your current task plan:
+<current_plan>
+${currentPlanSummary}
+</current_plan>
+Continue working on this plan. Use the update_plan tool to mark tasks as completed or add new tasks as needed.`
+		: null
+
+	const ideActivityInfo = ideActivitySummary
+		? `Real-time IDE activity (what the user is currently doing):
+<ide_activity>
+${ideActivitySummary}
+</ide_activity>
+Use this context to understand what the user is working on and provide more relevant assistance.`
+		: null
+
+	const memoriesInfo = memoriesSummary
+		? `Saved memories from previous conversations:
+<memories>
+${memoriesSummary}
+</memories>
+Use the save_memory tool to save new important information, or delete_memory to remove outdated ones.`
+		: null
+
+	const skillsInfo = installedSkills && installedSkills.length > 0
+		? `You have the following agent skills enabled:
+<agent_skills>
+${installedSkills.map(s => `- ${s.name} (${s.id}): ${s.description || 'No description'}${s.url ? ` | Source: ${s.url}` : ''}`).join('\n')}
+</agent_skills>
+Apply these skills to enhance your behavior and capabilities when relevant to the user's request.`
+		: null
+
+	// ========== Phase 2: 自动上下文注入 ==========
+
+	const gitStatusInfo = gitStatusSummary
+		? `Source control status (uncommitted changes):
+<git_status>
+${gitStatusSummary}
+</git_status>
+Use this to understand what files have been recently modified or are untracked.`
+		: null
+
+	const projectStackInfo = projectStackSummary
+		? `Project technology stack:
+<project_stack>
+${projectStackSummary}
+</project_stack>
+Use this to understand the project's build tools, scripts, and dependencies.`
+		: null
+
+	// Phase 2.3: 最近一次失败命令的输出摘要
+	const recentErrorsInfo = (mode === 'agent' && recentErrorsSummary)
+		? `Most recent terminal command failure (tail output, for context only):
+<recent_errors>
+${recentErrorsSummary}
+</recent_errors>
+If the user's request relates to this failure, address it directly. Otherwise, treat it as background context only.`
+		: null
+
+	// ========== P0-2: 新增 Agent 模式专属段落 ==========
+
+	// Autonomy 自主性与持续性规则
+	const autonomyRules = mode === 'agent' ? `## Autonomy and Persistence
+- You are an autonomous senior engineer. Once the user gives a direction, proactively gather context, plan, implement, test, and refine without waiting for additional prompts.
+- Persist until the task is fully handled end-to-end within the current turn. Do not stop at analysis or partial fixes.
+- Bias to action: default to implementing with reasonable assumptions. Do not end your turn asking for clarification unless truly blocked.
+- Avoid excessive looping: if you find yourself re-reading or re-editing the same files without clear progress, STOP and end the turn with a concise summary and targeted questions.` : null
+
+	// Code Quality 代码实现标准
+	const codeQualityRules = mode === 'agent' ? `## Code Implementation Standards
+- Conform to the codebase conventions: follow existing patterns, helpers, naming, formatting.
+- Tight error handling: No broad try/catch blocks or silent defaults. Propagate or surface errors explicitly.
+- Keep type safety: changes should pass build and type-check. Avoid unnecessary type casts.
+- DRY: search for existing helpers before adding new ones. Reuse or extract shared helpers.
+- Efficient edits: read enough context before changing a file. Batch logical edits together instead of many tiny patches.
+- Comprehensiveness: investigate and ensure you cover all relevant surfaces so behavior stays consistent.` : null
+
+	// Plan Discipline 计划纪律
+	const planDiscipline = mode === 'agent' ? `## Planning Discipline
+- Skip planning for straightforward tasks (roughly the easiest 25%).
+- Do not make single-step plans.
+- Unless explicitly asked for a plan, never end the interaction with only a plan. Plans guide your edits; the deliverable is working code.
+- Before finishing, reconcile every plan item: mark as Done, Blocked (with reason), or Cancelled. Do not end with in_progress items.` : null
+
+	// Exploration 文件探索规则
+	const explorationRules = (mode === 'agent' || mode === 'gather') ? `## File Exploration
+- Think first: before any tool call, decide ALL files you will need.
+- Batch reads: if you need multiple files, read them together in parallel tool calls.
+- Only make sequential calls if you truly cannot know the next file without seeing a result first.
+- Prefer search tools (\`search_for_files\`, \`search_pathnames_only\`) over reading files one by one to locate relevant code.` : null
+
+	// Tool Usage Strategy 工具使用策略
+	const toolStrategyRules = mode === 'agent' ? `## Tool Usage Strategy
+- Before modifying code, ALWAYS read the target file first to understand its current state and surrounding context.
+- For multi-file changes, read ALL affected files before making any edits to understand dependencies.
+- When a tool call fails, analyze the error message carefully and retry with corrected parameters. Never repeat the exact same failed call.
+- Use search tools to find all usages of a symbol before renaming or modifying its signature.
+- After making code changes, verify correctness by running the project's build or lint command if available.
+- When creating new files, always check if similar files or patterns already exist in the project to maintain consistency.
+- For large changes, break them into small atomic steps: read → plan → edit → verify → next file.` : null
+
+	// Error Recovery 错误恢复策略
+	const errorRecoveryRules = mode === 'agent' ? `## Error Recovery
+- If a file edit fails (e.g., old_str not found), re-read the file to get the exact current content, then retry with the correct string.
+- If a command fails, read the error output carefully. Common fixes:
+  - "Permission denied" → inform the user, do not retry blindly.
+  - "Module not found" / "Cannot resolve" → check imports and installed packages, suggest \`npm install\` if needed.
+  - "Syntax error" → re-read the file around the error line and fix the specific issue.
+  - "ENOENT" / "file not found" → verify the path exists using search or list tools.
+- After 2 consecutive failures on the same operation, step back: re-read context, consider alternative approaches, or ask the user.
+- Never get stuck in a retry loop. If something keeps failing, summarize what you tried and what went wrong.` : null
+
+	// Code Modification Best Practices 代码修改最佳实践
+	const codeModBestPractices = mode === 'agent' ? `## Code Modification Best Practices
+- Read at least 50 lines of surrounding context before making targeted edits.
+- Make edits that are self-contained: include all necessary imports, type annotations, and error handling in a single edit.
+- Prefer \`edit_file\` (surgical replacement) over \`rewrite_file\` (full file replacement) for existing files with small changes.
+- Use \`rewrite_file\` only when the majority of the file content needs to change or when creating new files.
+- When creating new files: use \`create_file_or_folder\` first, then \`rewrite_file\` to write content.
+- After completing edits, briefly verify by reading a few key lines of the modified file to confirm correctness.
+- Do not leave partial or broken code. Every edit should leave the file in a valid, compilable state.
+- When adding imports, place them at the top of the file grouped with existing imports of the same kind.` : null
+
+	// Verification Prompt 验证提示
+	const verificationPrompt = mode === 'agent' ? `## Verification After Changes
+- After making code changes, consider these verification steps:
+  1. **Lint/Type check**: If the project has a linter or TypeScript, run \`npm run lint\` or \`tsc --noEmit\` to catch errors early.
+  2. **Build check**: For compiled projects, run the build command to verify no compilation errors.
+  3. **Quick test**: If tests exist, run the relevant test suite (\`npm test\`, \`pytest\`, etc.).
+  4. **Manual review**: Read through the modified lines to ensure correctness and consistency.
+- Do NOT proceed with more changes until verification passes.
+- If verification fails, fix the issues before continuing.
+- When in doubt, inform the user of the verification status before moving on.` : null
+
 	// return answer
 	const ansStrs: string[] = []
 	ansStrs.push(header)
 	ansStrs.push(sysInfo)
+	// P0-2: 新增段落在系统信息之后、工具定义之前
+	if (autonomyRules) ansStrs.push(autonomyRules)
+	if (codeQualityRules) ansStrs.push(codeQualityRules)
+	if (explorationRules) ansStrs.push(explorationRules)
+	if (toolStrategyRules) ansStrs.push(toolStrategyRules)
+	if (errorRecoveryRules) ansStrs.push(errorRecoveryRules)
+	if (codeModBestPractices) ansStrs.push(codeModBestPractices)
+	if (verificationPrompt) ansStrs.push(verificationPrompt)
+	if (planDiscipline) ansStrs.push(planDiscipline)
+	if (activeContextInfo) ansStrs.push(activeContextInfo)
+	if (ideActivityInfo) ansStrs.push(ideActivityInfo)
+	if (memoriesInfo) ansStrs.push(memoriesInfo)
+	if (skillsInfo) ansStrs.push(skillsInfo)
+	if (gitStatusInfo) ansStrs.push(gitStatusInfo)
+	if (projectStackInfo) ansStrs.push(projectStackInfo)
+	if (recentErrorsInfo) ansStrs.push(recentErrorsInfo)
+	if (planInfo) ansStrs.push(planInfo)
 	if (toolDefinitions) ansStrs.push(toolDefinitions)
 	ansStrs.push(importantDetails)
 	ansStrs.push(fsInfo)

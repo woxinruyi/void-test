@@ -131,6 +131,10 @@ class NativeLocaleService implements ILocaleService {
 		return true;
 	}
 
+	private getConfiguredDefaultLocale(): string {
+		return typeof this.productService.defaultLocale === 'string' ? this.productService.defaultLocale.toLowerCase() : LANGUAGE_DEFAULT;
+	}
+
 	async setLocale(languagePackItem: ILanguagePackItem, skipDialog = false): Promise<void> {
 		const locale = languagePackItem.id;
 		if (locale === Language.value() || (!locale && Language.isDefaultVariant())) {
@@ -164,11 +168,13 @@ class NativeLocaleService implements ILocaleService {
 				);
 			}
 
-			if (!skipDialog && !await this.showRestartDialog(languagePackItem.label)) {
+			if (!skipDialog && !await this.showReloadDialog(languagePackItem.label)) {
 				return;
 			}
-			await this.writeLocaleValue(locale);
-			await this.hostService.restart();
+			if (!await this.writeLocaleValue(locale)) {
+				return;
+			}
+			await this.hostService.reload();
 		} catch (err) {
 			this.notificationService.error(err);
 		}
@@ -176,25 +182,45 @@ class NativeLocaleService implements ILocaleService {
 
 	async clearLocalePreference(): Promise<void> {
 		try {
-			await this.writeLocaleValue(undefined);
-			if (!Language.isDefaultVariant()) {
-				await this.showRestartDialog('English');
+			const defaultLocale = this.getConfiguredDefaultLocale();
+			if (Language.value() !== defaultLocale && !await this.showClearPreferenceDialog()) {
+				return;
+			}
+			if (!await this.writeLocaleValue(undefined)) {
+				return;
+			}
+			if (Language.value() !== defaultLocale) {
+				await this.hostService.reload();
 			}
 		} catch (err) {
 			this.notificationService.error(err);
 		}
 	}
 
-	private async showRestartDialog(languageName: string): Promise<boolean> {
+	private async showReloadDialog(languageName: string): Promise<boolean> {
 		const { confirmed } = await this.dialogService.confirm({
-			message: localize('restartDisplayLanguageMessage1', "Restart {0} to switch to {1}?", this.productService.nameLong, languageName),
+			message: localize('reloadDisplayLanguageMessage1', "Reload {0} to switch to {1}?", this.productService.nameLong, languageName),
 			detail: localize(
-				'restartDisplayLanguageDetail1',
-				"To change the display language to {0}, {1} needs to restart.",
+				'reloadDisplayLanguageDetail1',
+				"To change the display language to {0}, {1} needs to reload the window.",
 				languageName,
 				this.productService.nameLong
 			),
-			primaryButton: localize({ key: 'restart', comment: ['&& denotes a mnemonic character'] }, "&&Restart"),
+			primaryButton: localize({ key: 'reload', comment: ['&& denotes a mnemonic character'] }, "&&Reload"),
+		});
+
+		return confirmed;
+	}
+
+	private async showClearPreferenceDialog(): Promise<boolean> {
+		const { confirmed } = await this.dialogService.confirm({
+			message: localize('reloadDefaultDisplayLanguageMessage', "Reload {0} to restore the default display language?", this.productService.nameLong),
+			detail: localize(
+				'reloadDefaultDisplayLanguageDetail',
+				"To clear the display language preference, {0} needs to reload the window.",
+				this.productService.nameLong
+			),
+			primaryButton: localize({ key: 'reloadDefaultLanguage', comment: ['&& denotes a mnemonic character'] }, "&&Reload"),
 		});
 
 		return confirmed;

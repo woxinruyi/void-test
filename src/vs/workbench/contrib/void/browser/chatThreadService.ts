@@ -14,9 +14,12 @@ import { ILLMMessageService } from '../common/sendLLMMessageService.js';
 import { chat_userMessageContent, isABuiltinToolName } from '../common/prompt/prompts.js';
 import { AnthropicReasoning, getErrorMessage, RawToolCallObj, RawToolParamsObj } from '../common/sendLLMMessageTypes.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
-import { FeatureName, ModelSelection, ModelSelectionOptions } from '../common/voidSettingsTypes.js';
+import { AutoApproveSettings, FeatureName, ModelSelection, ModelSelectionOptions } from '../common/voidSettingsTypes.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
-import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, ToolCallParams, ToolName, ToolResult } from '../common/toolsServiceTypes.js';
+import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, ToolCallParams, ToolName, ToolResult, resolveToolName } from '../common/toolsServiceTypes.js';
+import { resolveAutoApprove } from '../common/helpers/autoApprove.js';
+import { resolveEffectiveTier, EffectiveTier } from '../common/helpers/reasoningAuto.js';
+import { tierToSendableReasoning, getModelCapabilities } from '../common/modelCapabilities.js';
 import { IToolsService } from './toolsService.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { ILanguageFeaturesService } from '../../../../editor/common/services/languageFeatures.js';
@@ -39,6 +42,10 @@ import { IDirectoryStrService } from '../common/directoryStrService.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { IMCPService } from '../common/mcpService.js';
 import { RawMCPToolCall } from '../common/mcpServiceTypes.js';
+import { IHookService } from './hookService.js';
+import type { HookPayload, HookResult } from '../common/hookTypes.js';
+import { ITurnCheckpointService } from './turnCheckpointService.js'
+import { IContextCompactionService } from './contextCompactionService.js';
 
 
 // related to retrying when LLM message has error
@@ -286,6 +293,10 @@ export interface IChatThreadService {
 	approveLatestToolRequest(threadId: string): void;
 	rejectLatestToolRequest(threadId: string): void;
 
+	// 会话级信任覆盖（"本会话信任此类"按钮用）；不持久化
+	setSessionAutoApprove(threadId: string, partial: AutoApproveSettings): void;
+	getSessionAutoApprove(threadId: string): AutoApproveSettings | undefined;
+
 	// jump to history
 	jumpToCheckpointBeforeMessageIdx(opts: { threadId: string, messageIdx: number, jumpToUserModified: boolean }): void;
 
@@ -310,6 +321,30 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 	// used in checkpointing
 	// private readonly _userModifiedFilesToCheckInCheckpoints = new LRUCache<string, null>(50)
 
+	/**
+	 * 每 thread 的会话级 autoApprove 覆盖（不持久化）。
+	 * 用户在 tool_request 卡片点击"本会话信任此类"时写入，当前 thread 内后续同类请求自动通过。
+	 */
+	private readonly _sessionAutoApproveOverrides: Map<string, AutoApproveSettings> = new Map()
+
+	/**
+	 * 每 thread 的最近一轮推理档位（不持久化）。
+	 * 供"thread 继承"决策使用 + UI 角标显示来源。
+	 */
+	private readonly _lastEffectiveTierByThread: Map<string, EffectiveTier> = new Map()
+
+	// ========== P1-1: 循环检测 ==========
+	/**
+	 * 每 thread 的最近工具调用记录（用于循环检测）
+	 */
+	private readonly _recentToolCalls: Map<string, Array<{ name: string, paramsHash: string, timestamp: number }>> = new Map()
+	private readonly LOOP_DETECTION_WINDOW = 5   // 检查最近 5 次调用
+	private readonly LOOP_THRESHOLD = 3          // 同一调用出现 3 次触发警告
+	private readonly MAX_AGENT_ROUNDS = 50       // Agent 循环硬上限
+
+	/** Current turn ID for checkpoint tracking (one turn per user message) */
+	private _currentTurnId: string | null = null
+
 
 
 	constructor(
@@ -327,6 +362,9 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		@IDirectoryStrService private readonly _directoryStringService: IDirectoryStrService,
 		@IFileService private readonly _fileService: IFileService,
 		@IMCPService private readonly _mcpService: IMCPService,
+		@IHookService private readonly _hookService: IHookService,
+		@ITurnCheckpointService private readonly _turnCheckpointService: ITurnCheckpointService,
+		@IContextCompactionService private readonly _contextCompactionService: IContextCompactionService,
 	) {
 		super()
 		this.state = { allThreads: {}, currentThreadId: null as unknown as string } // default state
@@ -550,8 +588,86 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		this._setStreamState(threadId, undefined)
 	}
 
+	setSessionAutoApprove(threadId: string, partial: AutoApproveSettings): void {
+		const prev = this._sessionAutoApproveOverrides.get(threadId) ?? {}
+		this._sessionAutoApproveOverrides.set(threadId, { ...prev, ...partial })
+	}
+
+	getSessionAutoApprove(threadId: string): AutoApproveSettings | undefined {
+		return this._sessionAutoApproveOverrides.get(threadId)
+	}
+
 	private _computeMCPServerOfToolName = (toolName: string) => {
 		return this._mcpService.getMCPTools()?.find(t => t.name === toolName)?.mcpServerName
+	}
+
+	/** 取 thread 中最后一条 role=='user' 的文本内容（用于推理档位关键词/启发式检测）。 */
+	private _extractLastUserPrompt(threadId: string): string {
+		const msgs = this.state.allThreads[threadId]?.messages ?? []
+		for (let i = msgs.length - 1; i >= 0; i--) {
+			const m = msgs[i]
+			if (m.role === 'user') {
+				const content: any = (m as any).displayContent ?? (m as any).content ?? ''
+				if (typeof content === 'string') return content
+				if (Array.isArray(content)) return content.map((c: any) => c?.text ?? '').join('\n')
+				return ''
+			}
+		}
+		return ''
+	}
+
+	/** 数过去 N 条消息里有多少条是 role=='tool'（用于启发式判断工具链深度）。 */
+	private _countRecentToolCalls(threadId: string, window: number): number {
+		const msgs = this.state.allThreads[threadId]?.messages ?? []
+		let cnt = 0
+		const start = Math.max(0, msgs.length - window)
+		for (let i = start; i < msgs.length; i++) {
+			if (msgs[i].role === 'tool') cnt++
+		}
+		return cnt
+	}
+
+	// ========== P1-1: 循环检测方法 ==========
+	/**
+	 * 检测是否存在工具调用循环。
+	 * 返回 true 表示检测到循环（同一工具+参数在最近 N 次中出现超过阈值次）
+	 */
+	private _checkForLoop(threadId: string, toolName: string, params: RawToolParamsObj): boolean {
+		const paramsHash = JSON.stringify(params).substring(0, 200)
+		const recent = this._recentToolCalls.get(threadId) ?? []
+
+		// 添加当前调用
+		recent.push({ name: toolName, paramsHash, timestamp: Date.now() })
+
+		// 只保留最近 LOOP_DETECTION_WINDOW 条
+		while (recent.length > this.LOOP_DETECTION_WINDOW) {
+			recent.shift()
+		}
+		this._recentToolCalls.set(threadId, recent)
+
+		// 检查是否有重复
+		const signature = `${toolName}:${paramsHash}`
+		const duplicates = recent.filter(r => `${r.name}:${r.paramsHash}` === signature)
+
+		const isLoop = duplicates.length >= this.LOOP_THRESHOLD
+		if (isLoop) {
+			this._metricsService.capture('Loop Detected', {
+				toolName,
+				repeatCount: duplicates.length,
+				threadId
+			})
+		}
+		return isLoop
+	}
+
+	/** 清理 thread 的循环检测记录（在新 thread 或 abort 时调用） */
+	private _clearLoopDetection(threadId: string): void {
+		this._recentToolCalls.delete(threadId)
+	}
+
+	/** 公开访问点：UI 角标用。 */
+	getLastEffectiveTier(threadId: string): EffectiveTier | undefined {
+		return this._lastEffectiveTierByThread.get(threadId)
 	}
 
 	async abortRunning(threadId: string) {
@@ -579,6 +695,13 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		}
 
 		this._addUserCheckpoint({ threadId })
+
+		// Abort turn checkpoint if one is active
+		if (this._currentTurnId) {
+			const tid = this._currentTurnId
+			this._currentTurnId = null
+			this._turnCheckpointService.abortTurn(tid).catch(() => { })
+		}
 
 		// interrupt any effects
 		const interrupt = await this.streamState[threadId]?.interrupt
@@ -610,6 +733,9 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		opts: { preapproved: true, unvalidatedToolParams: RawToolParamsObj, validatedParams: ToolCallParams<ToolName> } | { preapproved: false, unvalidatedToolParams: RawToolParamsObj },
 	): Promise<{ awaitingUserApproval?: boolean, interrupted?: boolean }> => {
 
+		// [VOID-TOOLS-DEBUG] Log tool execution entry
+		console.log(`[VOID-TOOLS-DEBUG] EXEC_TOOL | toolName=${toolName} toolId=${toolId} preapproved=${opts.preapproved} params=${JSON.stringify(opts.unvalidatedToolParams).substring(0, 500)}`)
+
 		// compute these below
 		let toolParams: ToolCallParams<ToolName>
 		let toolResult: ToolResult<ToolName>
@@ -620,10 +746,30 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 
 
 		if (!opts.preapproved) { // skip this if pre-approved
+
+			// 0. PreToolUse hook
+			const hookPayload: HookPayload = {
+				event: 'PreToolUse',
+				toolName,
+				params: opts.unvalidatedToolParams,
+				threadId,
+				workspaceRoot: this._workspaceContextService.getWorkspace().folders[0]?.uri?.fsPath ?? '',
+			}
+			const preResults = await this._hookService.trigger('PreToolUse', hookPayload)
+			const denied = preResults.find((r: HookResult) => r.decision === 'deny')
+			if (denied) {
+				const denyMsg = denied.message ?? 'Blocked by hook'
+				this._addMessageToThread(threadId, { role: 'tool', type: 'tool_error', rawParams: opts.unvalidatedToolParams, result: denyMsg, name: toolName, content: denyMsg, params: opts.unvalidatedToolParams, id: toolId, mcpServerName })
+				return {}
+			}
+			// Apply modifiedParams from last modify result
+			const modifyResult = [...preResults].reverse().find((r: HookResult) => r.decision === 'modify')
+			const effectiveParams = modifyResult?.modifiedParams ?? opts.unvalidatedToolParams
+
 			// 1. validate tool params
 			try {
 				if (isBuiltInTool) {
-					const params = this._toolsService.validateParams[toolName](opts.unvalidatedToolParams)
+					const params = this._toolsService.validateParams[toolName](effectiveParams)
 					toolParams = params
 				}
 				else {
@@ -638,15 +784,54 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 			// once validated, add checkpoint for edit
 			if (toolName === 'edit_file') { this._addToolEditCheckpoint({ threadId, uri: (toolParams as BuiltinToolCallParams['edit_file']).uri }) }
 			if (toolName === 'rewrite_file') { this._addToolEditCheckpoint({ threadId, uri: (toolParams as BuiltinToolCallParams['rewrite_file']).uri }) }
+			if (toolName === 'batch_edit') {
+				for (const edit of (toolParams as BuiltinToolCallParams['batch_edit']).edits) {
+					this._addToolEditCheckpoint({ threadId, uri: edit.uri })
+				}
+			}
+
+			// Record turn checkpoint for file ops
+			if (this._currentTurnId) {
+				const tid = this._currentTurnId
+				if (toolName === 'edit_file' || toolName === 'rewrite_file') {
+					const uri = (toolParams as BuiltinToolCallParams['edit_file'] | BuiltinToolCallParams['rewrite_file']).uri
+					this._voidModelService.getModelSafe(uri).then(({ model }) => {
+						if (model) this._turnCheckpointService.recordEdit(tid, uri, model.getValue()).catch(() => { })
+					})
+				} else if (toolName === 'batch_edit') {
+					const edits = (toolParams as BuiltinToolCallParams['batch_edit']).edits
+					for (const edit of edits) {
+						this._voidModelService.getModelSafe(edit.uri).then(({ model }) => {
+							if (model) this._turnCheckpointService.recordEdit(tid, edit.uri, model.getValue()).catch(() => { })
+						})
+					}
+				} else if (toolName === 'create_file_or_folder') {
+					this._turnCheckpointService.recordCreate(tid, (toolParams as BuiltinToolCallParams['create_file_or_folder']).uri).catch(() => { })
+				} else if (toolName === 'delete_file_or_folder') {
+					const uri = (toolParams as BuiltinToolCallParams['delete_file_or_folder']).uri
+					this._voidModelService.getModelSafe(uri).then(({ model }) => {
+						this._turnCheckpointService.recordDelete(tid, uri, model?.getValue() ?? '').catch(() => { })
+					})
+				} else if (toolName === 'run_command' || toolName === 'run_persistent_command') {
+					const cmd = (toolParams as BuiltinToolCallParams['run_command'] | BuiltinToolCallParams['run_persistent_command']).command
+					const cwd = (toolParams as BuiltinToolCallParams['run_command']).cwd ?? ''
+					this._turnCheckpointService.recordCommand(tid, cmd, cwd).catch(() => { })
+				}
+			}
 
 			// 2. if tool requires approval, break from the loop, awaiting approval
 
 			const approvalType = isBuiltInTool ? approvalTypeOfBuiltinToolName[toolName] : 'MCP tools'
 			if (approvalType) {
-				const autoApprove = this._settingsService.state.globalSettings.autoApprove[approvalType]
-				// add a tool_request because we use it for UI if a tool is loading (this should be improved in the future)
+				// 合并：全局 autoApprove + 本 thread 会话级覆盖
+				const globalAA = this._settingsService.state.globalSettings.autoApprove
+				const sessionAA = this._sessionAutoApproveOverrides.get(threadId)
+				const mergedAA: AutoApproveSettings = sessionAA ? { ...globalAA, ...sessionAA } : globalAA
+				const workspaceFolders = this._workspaceContextService.getWorkspace().folders.map(f => f.uri)
+				const decision = resolveAutoApprove(toolName, toolParams, mergedAA, { workspaceFolders, mcpServerName })
+				// add a tool_request for UI (cards render from this message)
 				this._addMessageToThread(threadId, { role: 'tool', type: 'tool_request', content: '(Awaiting user permission...)', result: null, name: toolName, params: toolParams, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName })
-				if (!autoApprove) {
+				if (decision === 'manual') {
 					return { awaitingUserApproval: true }
 				}
 			}
@@ -703,6 +888,11 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 
 			const errorMessage = getErrorMessage(error)
 			this._updateLatestTool(threadId, { role: 'tool', type: 'tool_error', params: toolParams, result: errorMessage, name: toolName, content: errorMessage, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName })
+			// ToolUseError hook
+			await this._hookService.trigger('ToolUseError', {
+				event: 'ToolUseError', toolName, params: toolParams, error: errorMessage,
+				threadId, workspaceRoot: this._workspaceContextService.getWorkspace().folders[0]?.uri?.fsPath ?? '',
+			}).catch(() => { })
 			return {}
 		}
 
@@ -721,7 +911,15 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 			return {}
 		}
 
-		// 5. add to history and keep going
+		// 5. PostToolUse hook
+		const postResults = await this._hookService.trigger('PostToolUse', {
+			event: 'PostToolUse', toolName, params: toolParams, result: toolResult,
+			threadId, workspaceRoot: this._workspaceContextService.getWorkspace().folders[0]?.uri?.fsPath ?? '',
+		})
+		const postMessages = postResults.map((r: HookResult) => r.message).filter(Boolean).join('\n')
+		if (postMessages) toolResultStr += `\n\n${postMessages}`
+
+		// 6. add to history and keep going
 		this._updateLatestTool(threadId, { role: 'tool', type: 'success', params: toolParams, result: toolResult, name: toolName, content: toolResultStr, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName })
 		return {}
 	};
@@ -757,7 +955,8 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 
 		// before enter loop, call tool
 		if (callThisToolFirst) {
-			const { interrupted } = await this._runToolCall(threadId, callThisToolFirst.name, callThisToolFirst.id, callThisToolFirst.mcpServerName, { preapproved: true, unvalidatedToolParams: callThisToolFirst.rawParams, validatedParams: callThisToolFirst.params })
+			const resolvedFirstName = resolveToolName(callThisToolFirst.name)
+			const { interrupted } = await this._runToolCall(threadId, resolvedFirstName, callThisToolFirst.id, callThisToolFirst.mcpServerName, { preapproved: true, unvalidatedToolParams: callThisToolFirst.rawParams, validatedParams: callThisToolFirst.params })
 			if (interrupted) {
 				this._setStreamState(threadId, undefined)
 				this._addUserCheckpoint({ threadId })
@@ -768,15 +967,64 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 
 
 		// tool use loop
+		let forceNoTools = false // when true, ignore tool calls from LLM response (used for final summary after max rounds)
 		while (shouldSendAnotherMessage) {
 			// false by default each iteration
 			shouldSendAnotherMessage = false
 			isRunningWhenEnd = undefined
 			nMessagesSent += 1
 
+			// P1-1: 硬上限检查 - 防止无限循环
+			if (nMessagesSent > this.MAX_AGENT_ROUNDS) {
+				if (forceNoTools) {
+					// Already did the final summary call, stop now
+					break
+				}
+				const maxRoundsMsg = `Agent reached maximum ${this.MAX_AGENT_ROUNDS} rounds. You MUST stop calling tools now. Summarize what you have accomplished so far and what remains to be done.`
+				this._addMessageToThread(threadId, {
+					role: 'tool',
+					type: 'tool_error',
+					name: 'system',
+					content: maxRoundsMsg,
+					result: maxRoundsMsg,
+					params: {},
+					id: 'max_rounds_limit',
+					rawParams: {},
+					mcpServerName: undefined
+				} as any)
+				this._metricsService.capture('Agent Max Rounds Reached', { nMessagesSent, threadId })
+				// Allow one more LLM call but force it to produce text only (no tools)
+				forceNoTools = true
+				shouldSendAnotherMessage = true
+				continue
+			}
+
 			this._setStreamState(threadId, { isRunning: 'idle', interrupt: idleInterruptor })
 
-			const chatMessages = this.state.allThreads[threadId]?.messages ?? []
+			let chatMessages = this.state.allThreads[threadId]?.messages ?? []
+
+			// Context compaction: summarize older messages when context window fills up
+			if (modelSelection) {
+				const { contextWindow } = getModelCapabilities(modelSelection.providerName, modelSelection.modelName, overridesOfModel)
+				if (this._contextCompactionService.shouldCompact(chatMessages, contextWindow)) {
+					try {
+						const compactionResult = await this._contextCompactionService.compact(chatMessages, contextWindow)
+						if (compactionResult.summarizedCount > 0) {
+							// Replace thread messages with compacted version
+							const thread = this.state.allThreads[threadId]
+							if (thread) {
+								thread.messages = compactionResult.compactedMessages
+								chatMessages = compactionResult.compactedMessages
+								this._metricsService.capture('Context Compacted', {
+									summarizedCount: compactionResult.summarizedCount,
+									tokensSaved: compactionResult.tokensSaved,
+								})
+							}
+						}
+					} catch { /* compaction failed, continue with full messages */ }
+				}
+			}
+
 			const { messages, separateSystemMessage } = await this._convertToLLMMessagesService.prepareLLMChatMessages({
 				chatMessages,
 				modelSelection,
@@ -794,8 +1042,57 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 				shouldRetryLLM = false
 				nAttempts += 1
 
+				// ========== P0-2: 推理档位自适应 ==========
+				// 每轮 LLM 调用前，根据 prompt 关键词 / 启发式 / thread 继承决策档位，
+				// 并把映射出的 budget/effort 覆盖到本轮 modelSelectionOptions。
+				let effectiveReasoningTier: EffectiveTier | undefined
+				let effectiveModelSelectionOptions: ModelSelectionOptions | undefined = modelSelectionOptions
+				if (modelSelection) {
+					const gs = this._settingsService.state.globalSettings
+					const lastUserPrompt = this._extractLastUserPrompt(threadId)
+					const toolChainDepth = this._countRecentToolCalls(threadId, 5)
+					const retryCount = nAttempts - 1
+					const prevTier = this._lastEffectiveTierByThread.get(threadId)?.tier
+
+					effectiveReasoningTier = resolveEffectiveTier({
+						lastUserPrompt,
+						manualOptions: modelSelectionOptions,
+						autoSettings: {
+							reasoningAutoEnabled: gs.reasoningAutoEnabled,
+							reasoningKeywordTriggersEnabled: gs.reasoningKeywordTriggersEnabled,
+							reasoningHeuristicsEnabled: gs.reasoningHeuristicsEnabled,
+							reasoningDefaultTier: gs.reasoningDefaultTier,
+							reasoningThreadInherit: gs.reasoningThreadInherit,
+						},
+						ctx: { toolChainDepth, retryCount, previousThreadTier: prevTier },
+					})
+
+					// 若不是手动，则按 tier 覆盖 modelSelectionOptions 的 reasoningBudget/reasoningEffort
+					if (effectiveReasoningTier.source.kind !== 'manual') {
+						const sendable = tierToSendableReasoning(
+							effectiveReasoningTier.tier,
+							modelSelection.providerName,
+							modelSelection.modelName,
+							overridesOfModel
+						)
+						if (sendable) {
+							effectiveModelSelectionOptions = { ...(modelSelectionOptions ?? {}) }
+							if (sendable.type === 'budget_slider_value') {
+								effectiveModelSelectionOptions.reasoningEnabled = true
+								effectiveModelSelectionOptions.reasoningBudget = sendable.reasoningBudget
+							} else if (sendable.type === 'effort_slider_value') {
+								effectiveModelSelectionOptions.reasoningEnabled = true
+								effectiveModelSelectionOptions.reasoningEffort = sendable.reasoningEffort
+							}
+						}
+					}
+					// 记录本轮档位供 UI + 下轮继承
+					this._lastEffectiveTierByThread.set(threadId, effectiveReasoningTier)
+				}
+				// ==========================================
+
 				type ResTypes =
-					| { type: 'llmDone', toolCall?: RawToolCallObj, info: { fullText: string, fullReasoning: string, anthropicReasoning: AnthropicReasoning[] | null } }
+					| { type: 'llmDone', toolCall?: RawToolCallObj, toolCalls?: RawToolCallObj[], info: { fullText: string, fullReasoning: string, anthropicReasoning: AnthropicReasoning[] | null } }
 					| { type: 'llmError', error?: { message: string; fullError: Error | null; } }
 					| { type: 'llmAborted' }
 
@@ -807,15 +1104,22 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 					chatMode,
 					messages: messages,
 					modelSelection,
-					modelSelectionOptions,
+					modelSelectionOptions: effectiveModelSelectionOptions,
 					overridesOfModel,
-					logging: { loggingName: `Chat - ${chatMode}`, loggingExtras: { threadId, nMessagesSent, chatMode } },
+					logging: {
+						loggingName: `Chat - ${chatMode}`,
+						loggingExtras: {
+							threadId, nMessagesSent, chatMode,
+							effectiveReasoningTier: effectiveReasoningTier?.tier,
+							effectiveReasoningSource: effectiveReasoningTier?.source.kind,
+						}
+					},
 					separateSystemMessage: separateSystemMessage,
 					onText: ({ fullText, fullReasoning, toolCall }) => {
 						this._setStreamState(threadId, { isRunning: 'LLM', llmInfo: { displayContentSoFar: fullText, reasoningSoFar: fullReasoning, toolCallSoFar: toolCall ?? null }, interrupt: Promise.resolve(() => { if (llmCancelToken) this._llmMessageService.abort(llmCancelToken) }) })
 					},
-					onFinalMessage: async ({ fullText, fullReasoning, toolCall, anthropicReasoning, }) => {
-						resMessageIsDonePromise({ type: 'llmDone', toolCall, info: { fullText, fullReasoning, anthropicReasoning } }) // resolve with tool calls
+					onFinalMessage: async ({ fullText, fullReasoning, toolCall, toolCalls, anthropicReasoning, }) => {
+						resMessageIsDonePromise({ type: 'llmDone', toolCall, toolCalls, info: { fullText, fullReasoning, anthropicReasoning } }) // resolve with tool calls
 					},
 					onError: async (error) => {
 						resMessageIsDonePromise({ type: 'llmError', error: error })
@@ -875,23 +1179,71 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 				}
 
 				// llm res success
-				const { toolCall, info } = llmRes
+				const { toolCall, toolCalls, info } = llmRes
 
 				this._addMessageToThread(threadId, { role: 'assistant', displayContent: info.fullText, reasoning: info.fullReasoning, anthropicReasoning: info.anthropicReasoning })
 
 				this._setStreamState(threadId, { isRunning: 'idle', interrupt: 'not_needed' }) // just decorative for clarity
 
-				// call tool if there is one
-				if (toolCall) {
-					const mcpTools = this._mcpService.getMCPTools()
-					const mcpTool = mcpTools?.find(t => t.name === toolCall.name)
+				// Determine effective tool list: prefer toolCalls array (parallel), fallback to single toolCall
+				// If forceNoTools is set (max rounds reached), ignore all tool calls to force text-only summary
+				const effectiveToolCalls = forceNoTools ? [] : ((toolCalls && toolCalls.length > 0) ? toolCalls : (toolCall ? [toolCall] : []))
 
-					const { awaitingUserApproval, interrupted } = await this._runToolCall(threadId, toolCall.name, toolCall.id, mcpTool?.mcpServerName, { preapproved: false, unvalidatedToolParams: toolCall.rawParams })
-					if (interrupted) {
+				// call tools if there are any
+				if (effectiveToolCalls.length > 0) {
+					if (effectiveToolCalls.length > 1) {
+						console.log(`[VOID-TOOLS-DEBUG] PARALLEL | ${effectiveToolCalls.length} tool calls: ${effectiveToolCalls.map(tc => tc.name).join(', ')}`)
+					}
+
+					const mcpTools = this._mcpService.getMCPTools()
+					let anyInterrupted = false
+					let anyAwaitingApproval = false
+
+					// Execute tool calls sequentially to respect approval flow and state consistency
+					// (parallel Promise.all would break approval UX and state tracking)
+					for (const tc of effectiveToolCalls) {
+						// Resolve aliased tool names (e.g. write_to_file → rewrite_file)
+						const resolvedName = resolveToolName(tc.name)
+						if (resolvedName !== tc.name) {
+							console.log(`[VOID-TOOLS-DEBUG] ALIAS | "${tc.name}" → "${resolvedName}"`)
+						}
+
+						// P1-1: 循环检测 - 如果同一工具调用重复过多次，跳过执行并发出警告
+						if (this._checkForLoop(threadId, resolvedName, tc.rawParams)) {
+							const loopWarningMsg = 'WARNING: Loop detected - skipping repeated tool call "' + resolvedName + '". Please try a different approach or summarize your progress.'
+							console.log(`[VOID-TOOLS-DEBUG] LOOP_SKIP | ${resolvedName}`)
+							this._addMessageToThread(threadId, {
+								role: 'tool',
+								type: 'tool_error',
+								name: resolvedName,
+								content: loopWarningMsg,
+								result: loopWarningMsg,
+								params: {},
+								id: tc.id || ('loop_skip_' + generateUuid()),
+								rawParams: tc.rawParams,
+								mcpServerName: undefined
+							} as any)
+							continue // skip this tool call, move to next
+						}
+
+						const mcpTool = mcpTools?.find(t => t.name === resolvedName)
+
+						const { awaitingUserApproval, interrupted } = await this._runToolCall(threadId, resolvedName, tc.id, mcpTool?.mcpServerName, { preapproved: false, unvalidatedToolParams: tc.rawParams })
+						if (interrupted) {
+							anyInterrupted = true
+							break
+						}
+						if (awaitingUserApproval) {
+							anyAwaitingApproval = true
+							break
+						}
+					}
+
+					if (anyInterrupted) {
 						this._setStreamState(threadId, undefined)
 						return
 					}
-					if (awaitingUserApproval) { isRunningWhenEnd = 'awaiting_user' }
+					if (anyAwaitingApproval) { isRunningWhenEnd = 'awaiting_user' }
 					else { shouldSendAnotherMessage = true }
 
 					this._setStreamState(threadId, { isRunning: 'idle', interrupt: 'not_needed' }) // just decorative, for clarity
@@ -904,7 +1256,16 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		this._setStreamState(threadId, { isRunning: isRunningWhenEnd })
 
 		// add checkpoint before the next user message
-		if (!isRunningWhenEnd) this._addUserCheckpoint({ threadId })
+		if (!isRunningWhenEnd) {
+			this._addUserCheckpoint({ threadId })
+			// Commit turn checkpoint
+			if (this._currentTurnId) {
+				const tid = this._currentTurnId
+				this._currentTurnId = null
+				this._turnCheckpointService.commitTurn(tid).catch(() => { })
+				this._turnCheckpointService.gcOldTurns(threadId, 30).catch(() => { })
+			}
+		}
 
 		// capture number of messages sent
 		this._metricsService.capture('Agent Loop Done', { nMessagesSent, chatMode })
@@ -1253,6 +1614,24 @@ We only need to do it for files that were edited since `from`, ie files between 
 		const userMessageContent = await chat_userMessageContent(instructions, currSelns, { directoryStrService: this._directoryStringService, fileService: this._fileService }) // user message + names of files (NOT content)
 		const userHistoryElt: ChatMessage = { role: 'user', content: userMessageContent, displayContent: instructions, selections: currSelns, state: defaultMessageState }
 		this._addMessageToThread(threadId, userHistoryElt)
+
+		// UserPromptSubmit hook
+		this._hookService.trigger('UserPromptSubmit', {
+			event: 'UserPromptSubmit',
+			message: instructions,
+			threadId,
+			workspaceRoot: this._workspaceContextService.getWorkspace().folders[0]?.uri?.fsPath ?? '',
+		}).catch(() => { })
+
+		// Begin turn checkpoint
+		const turnId = generateUuid()
+		this._currentTurnId = turnId
+		this._turnCheckpointService.beginTurn(threadId, turnId, instructions).catch(() => { })
+
+		// Attach turnId to the user message we just added
+		if (userHistoryElt.role === 'user') {
+			userHistoryElt.turnId = turnId
+		}
 
 		this._setThreadState(threadId, { currCheckpointIdx: null }) // no longer at a checkpoint because started streaming
 
@@ -1637,6 +2016,9 @@ We only need to do it for files that were edited since `from`, ie files between 
 		}
 		// otherwise, start a new thread
 		const newThread = newThreadObject()
+
+		// P1-1: 新 thread 时清理循环检测记录
+		this._clearLoopDetection(newThread.id)
 
 		// update state
 		const newThreads: ChatThreads = {

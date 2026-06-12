@@ -1,0 +1,2 @@
+node-pty/prebuilds/darwin-*/**
+node-pty/prebuilds/linux-*/**

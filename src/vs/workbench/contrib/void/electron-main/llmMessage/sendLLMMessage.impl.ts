@@ -20,6 +20,33 @@ import { getSendableReasoningInfo, getModelCapabilities, getProviderCapabilities
 import { extractReasoningWrapper, extractXMLToolsWrapper } from './extractGrammar.js';
 import { availableTools, InternalToolInfo } from '../../common/prompt/prompts.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+
+// [VOID-TOOLS-DEBUG] File-based logging for runtime diagnosis
+// Write to both temp dir (always writable) and project root (convenient)
+const _debugLogPaths = [
+	path.join(os.tmpdir(), 'void-tools-debug.log'),
+	path.join('i:\\自动化执行\\void-main', '.void', 'tools-debug.log'),
+]
+let _debugLogInitialized = false
+const _debugLog = (line: string) => {
+	const ts = new Date().toISOString()
+	let msg = `[${ts}] ${line}\n`
+	if (!_debugLogInitialized) {
+		_debugLogInitialized = true
+		msg = `[${ts}] === VOID-TOOLS-DEBUG LOG START === cwd=${process.cwd()} tmpdir=${os.tmpdir()}\n` + msg
+	}
+	console.log(`[VOID-TOOLS-DEBUG] ${line}`)
+	for (const logFile of _debugLogPaths) {
+		try {
+			const dir = path.dirname(logFile)
+			if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+			fs.appendFileSync(logFile, msg)
+		} catch { /* ignore write errors for this path */ }
+	}
+}
 
 const getGoogleApiKey = async () => {
 	// module‑level singleton
@@ -49,6 +76,7 @@ type SendChatParams_Internal = InternalCommonMessageParams & {
 	separateSystemMessage: string | undefined;
 	chatMode: ChatMode | null;
 	mcpTools: InternalToolInfo[] | undefined;
+	promptCaching?: boolean; // add-prompt-caching
 }
 type SendFIMParams_Internal = InternalCommonMessageParams & { messages: LLMFIMMessage; separateSystemMessage: string | undefined; }
 export type ListParams_Internal<ModelResponse> = ModelListParams<ModelResponse>
@@ -167,6 +195,11 @@ const newOpenAICompatibleSDK = async ({ settingsOfProvider, providerName, includ
 		const thisConfig = settingsOfProvider[providerName]
 		return new OpenAI({ baseURL: 'https://api.mistral.ai/v1', apiKey: thisConfig.apiKey, ...commonPayloadOpts })
 	}
+	else if (providerName === 'aiyiwei') {
+		const thisConfig = settingsOfProvider[providerName]
+		const baseURL = (thisConfig.endpoint || 'https://aiyiwei.vip') + '/v1'
+		return new OpenAI({ baseURL, apiKey: thisConfig.apiKey, ...commonPayloadOpts })
+	}
 
 	else throw new Error(`Void providerName was invalid: ${providerName}.`)
 }
@@ -211,20 +244,26 @@ const _sendOpenAICompatibleFIM = async ({ messages: { prefix, suffix, stopTokens
 const toOpenAICompatibleTool = (toolInfo: InternalToolInfo) => {
 	const { name, description, params } = toolInfo
 
-	const paramsWithType: { [s: string]: { description: string; type: 'string' } } = {}
-	for (const key in params) { paramsWithType[key] = { ...params[key], type: 'string' } }
+	// Build JSON-Schema-compliant properties: every property needs a `type` field
+	const properties: { [s: string]: { description: string; type: 'string' } } = {}
+	const required: string[] = []
+	for (const key in params) {
+		properties[key] = { ...params[key], type: 'string' }
+		// Treat params whose description does NOT start with "Optional" as required
+		if (!params[key].description.startsWith('Optional')) {
+			required.push(key)
+		}
+	}
 
 	return {
 		type: 'function',
 		function: {
 			name: name,
-			// strict: true, // strict mode - https://platform.openai.com/docs/guides/function-calling?api-mode=chat
 			description: description,
 			parameters: {
 				type: 'object',
-				properties: params,
-				// required: Object.keys(params), // in strict mode, all params are required and additionalProperties is false
-				// additionalProperties: false,
+				properties,
+				...(required.length > 0 ? { required } : {}),
 			},
 		}
 	} satisfies OpenAI.Chat.Completions.ChatCompletionTool
@@ -273,10 +312,16 @@ const rawToolCallObjOfAnthropicParams = (toolBlock: Anthropic.Messages.ToolUseBl
 const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onError, settingsOfProvider, modelSelectionOptions, modelName: modelName_, _setAborter, providerName, chatMode, separateSystemMessage, overridesOfModel, mcpTools }: SendChatParams_Internal) => {
 	const {
 		modelName,
-		specialToolFormat,
+		specialToolFormat: rawToolFormat,
 		reasoningCapabilities,
 		additionalOpenAIPayload,
 	} = getModelCapabilities(providerName, modelName_, overridesOfModel)
+
+	// Runtime guard: all callers of this function use the OpenAI SDK, so the only
+	// native tool format that works is 'openai-style'. If modelCapabilities returned
+	// 'anthropic-style', 'gemini-style', or undefined, override to 'openai-style'
+	// so that tools are always sent in the request body.
+	const specialToolFormat = 'openai-style' as typeof rawToolFormat
 
 	const { providerReasoningIOSettings } = getProviderCapabilities(providerName)
 
@@ -310,6 +355,9 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 		// max_completion_tokens: maxTokens,
 	}
 
+	// [VOID-TOOLS-DEBUG] Log request parameters for diagnosis
+	_debugLog(`REQUEST | provider=${providerName} model=${modelName} rawToolFormat=${rawToolFormat} effectiveToolFormat=${specialToolFormat} chatMode=${chatMode} nativeToolCount=${potentialTools?.length ?? 0} toolsAttached=${'tools' in nativeToolsObj} msgCount=${messages?.length ?? 0}`)
+
 	// open source models - manually parse think tokens
 	const { needsManualParse: needsManualReasoningParse, nameOfFieldInDelta: nameOfReasoningFieldInDelta } = providerReasoningIOSettings?.output ?? {}
 	const manuallyParseReasoning = needsManualReasoningParse && canIOReasoning && openSourceThinkTags
@@ -329,9 +377,8 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 	let fullReasoningSoFar = ''
 	let fullTextSoFar = ''
 
-	let toolName = ''
-	let toolId = ''
-	let toolParamsStr = ''
+	// Parallel tool calls: accumulate streaming deltas per tool index
+	const toolAccumulators: Map<number, { name: string; paramsStr: string; id: string }> = new Map()
 
 	openai.chat.completions
 		.create(options)
@@ -343,14 +390,16 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 				const newText = chunk.choices[0]?.delta?.content ?? ''
 				fullTextSoFar += newText
 
-				// tool call
+				// tool calls - collect ALL indices for parallel support
 				for (const tool of chunk.choices[0]?.delta?.tool_calls ?? []) {
 					const index = tool.index
-					if (index !== 0) continue
-
-					toolName += tool.function?.name ?? ''
-					toolParamsStr += tool.function?.arguments ?? '';
-					toolId += tool.id ?? ''
+					if (!toolAccumulators.has(index)) {
+						toolAccumulators.set(index, { name: '', paramsStr: '', id: '' })
+					}
+					const acc = toolAccumulators.get(index)!
+					acc.name += tool.function?.name ?? ''
+					acc.paramsStr += tool.function?.arguments ?? ''
+					acc.id += tool.id ?? ''
 				}
 
 
@@ -362,22 +411,36 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 					fullReasoningSoFar += newReasoning
 				}
 
-				// call onText
+				// call onText - show first tool call for streaming display
+				const firstAcc = toolAccumulators.get(0)
 				onText({
 					fullText: fullTextSoFar,
 					fullReasoning: fullReasoningSoFar,
-					toolCall: !toolName ? undefined : { name: toolName, rawParams: {}, isDone: false, doneParams: [], id: toolId },
+					toolCall: !firstAcc?.name ? undefined : { name: firstAcc.name, rawParams: {}, isDone: false, doneParams: [], id: firstAcc.id },
 				})
 
 			}
-			// on final
-			if (!fullTextSoFar && !fullReasoningSoFar && !toolName) {
+			// on final - parse all accumulated tool calls
+			const firstAcc = toolAccumulators.get(0)
+			if (!fullTextSoFar && !fullReasoningSoFar && !firstAcc?.name) {
 				onError({ message: 'Void: Response from model was empty.', fullError: null })
 			}
 			else {
-				const toolCall = rawToolCallObjOfParamsStr(toolName, toolParamsStr, toolId)
+				// Parse all tool calls from accumulated data
+				const allToolCalls: RawToolCallObj[] = []
+				const sortedIndices = [...toolAccumulators.keys()].sort((a, b) => a - b)
+				for (const idx of sortedIndices) {
+					const acc = toolAccumulators.get(idx)!
+					const tc = rawToolCallObjOfParamsStr(acc.name, acc.paramsStr, acc.id)
+					if (tc) allToolCalls.push(tc)
+				}
+				const toolCall = allToolCalls[0] ?? null
 				const toolCallObj = toolCall ? { toolCall } : {}
-				onFinalMessage({ fullText: fullTextSoFar, fullReasoning: fullReasoningSoFar, anthropicReasoning: null, ...toolCallObj });
+				const toolCallsObj = allToolCalls.length > 0 ? { toolCalls: allToolCalls } : {}
+				// [VOID-TOOLS-DEBUG] Log final response with tool call info
+				_debugLog(`RESPONSE | provider=${providerName} model=${modelName} textLen=${fullTextSoFar.length} reasoningLen=${fullReasoningSoFar.length} toolCount=${allToolCalls.length}`)
+				for (const tc of allToolCalls) _debugLog(`TOOL_CALL | name=${tc.name} id=${tc.id} params=${JSON.stringify(tc.rawParams).substring(0, 500)}`)
+				onFinalMessage({ fullText: fullTextSoFar, fullReasoning: fullReasoningSoFar, anthropicReasoning: null, ...toolCallObj, ...toolCallsObj });
 			}
 		})
 		// when error/fail - this catches errors of both .create() and .then(for await)
@@ -455,7 +518,7 @@ const anthropicTools = (chatMode: ChatMode | null, mcpTools: InternalToolInfo[] 
 
 
 // ------------ ANTHROPIC ------------
-const sendAnthropicChat = async ({ messages, providerName, onText, onFinalMessage, onError, settingsOfProvider, modelSelectionOptions, overridesOfModel, modelName: modelName_, _setAborter, separateSystemMessage, chatMode, mcpTools }: SendChatParams_Internal) => {
+const sendAnthropicChat = async ({ messages, providerName, onText, onFinalMessage, onError, settingsOfProvider, modelSelectionOptions, overridesOfModel, modelName: modelName_, _setAborter, separateSystemMessage, chatMode, mcpTools, promptCaching }: SendChatParams_Internal) => {
 	const {
 		modelName,
 		specialToolFormat,
@@ -473,6 +536,11 @@ const sendAnthropicChat = async ({ messages, providerName, onText, onFinalMessag
 
 	// tools
 	const potentialTools = anthropicTools(chatMode, mcpTools)
+	// add-prompt-caching：给最后一个工具定义打缓存断点（tools 渲染在前缀最前，稳定性最高，单独断点可在 system 变化时仍命中）
+	if (promptCaching && potentialTools && potentialTools.length > 0) {
+		const lastIdx = potentialTools.length - 1
+		potentialTools[lastIdx] = { ...potentialTools[lastIdx], cache_control: { type: 'ephemeral' } }
+	}
 	const nativeToolsObj = potentialTools && specialToolFormat === 'anthropic-style' ?
 		{ tools: potentialTools, tool_choice: { type: 'auto' } } as const
 		: {}
@@ -484,8 +552,13 @@ const sendAnthropicChat = async ({ messages, providerName, onText, onFinalMessag
 		dangerouslyAllowBrowser: true
 	});
 
+	// add-prompt-caching：system 转为数组形态并在末尾打缓存断点（仅在开关开启且有系统消息时）
+	const systemParam = (promptCaching && separateSystemMessage)
+		? [{ type: 'text' as const, text: separateSystemMessage, cache_control: { type: 'ephemeral' as const } }]
+		: (separateSystemMessage ?? undefined)
+
 	const stream = anthropic.messages.stream({
-		system: separateSystemMessage ?? undefined,
+		system: systemParam,
 		messages: messages as AnthropicLLMChatMessage[],
 		model: modelName,
 		max_tokens: maxTokens ?? 4_096, // anthropic requires this
@@ -565,10 +638,12 @@ const sendAnthropicChat = async ({ messages, providerName, onText, onFinalMessag
 		const tools = response.content.filter(c => c.type === 'tool_use')
 		// console.log('TOOLS!!!!!!', JSON.stringify(tools, null, 2))
 		// console.log('TOOLS!!!!!!', JSON.stringify(response, null, 2))
-		const toolCall = tools[0] && rawToolCallObjOfAnthropicParams(tools[0])
+		const allToolCalls: RawToolCallObj[] = tools.map(t => rawToolCallObjOfAnthropicParams(t)).filter((tc): tc is RawToolCallObj => tc !== null)
+		const toolCall = allToolCalls[0] ?? null
 		const toolCallObj = toolCall ? { toolCall } : {}
+		const toolCallsObj = allToolCalls.length > 0 ? { toolCalls: allToolCalls } : {}
 
-		onFinalMessage({ fullText, fullReasoning, anthropicReasoning, ...toolCallObj })
+		onFinalMessage({ fullText, fullReasoning, anthropicReasoning, ...toolCallObj, ...toolCallsObj })
 	})
 	// on error
 	stream.on('error', (error) => {
@@ -773,9 +848,8 @@ const sendGeminiChat = async ({
 	let fullReasoningSoFar = ''
 	let fullTextSoFar = ''
 
-	let toolName = ''
-	let toolParamsStr = ''
-	let toolId = ''
+	// Gemini parallel tool calls: accumulate all function calls across chunks
+	const geminiToolAccumulators: Array<{ name: string; paramsStr: string; id: string }> = []
 
 
 	genAI.models.generateContentStream({
@@ -796,33 +870,43 @@ const sendGeminiChat = async ({
 				const newText = chunk.text ?? ''
 				fullTextSoFar += newText
 
-				// tool call
+				// tool calls - collect ALL function calls
 				const functionCalls = chunk.functionCalls
 				if (functionCalls && functionCalls.length > 0) {
-					const functionCall = functionCalls[0] // Get the first function call
-					toolName = functionCall.name ?? ''
-					toolParamsStr = JSON.stringify(functionCall.args ?? {})
-					toolId = functionCall.id ?? ''
+					for (const fc of functionCalls) {
+						geminiToolAccumulators.push({
+							name: fc.name ?? '',
+							paramsStr: JSON.stringify(fc.args ?? {}),
+							id: fc.id ?? generateUuid(),
+						})
+					}
 				}
 
 				// (do not handle reasoning yet)
 
-				// call onText
+				// call onText - show first tool call for streaming display
+				const firstTool = geminiToolAccumulators[0]
 				onText({
 					fullText: fullTextSoFar,
 					fullReasoning: fullReasoningSoFar,
-					toolCall: !toolName ? undefined : { name: toolName, rawParams: {}, isDone: false, doneParams: [], id: toolId },
+					toolCall: !firstTool?.name ? undefined : { name: firstTool.name, rawParams: {}, isDone: false, doneParams: [], id: firstTool.id },
 				})
 			}
 
-			// on final
-			if (!fullTextSoFar && !fullReasoningSoFar && !toolName) {
+			// on final - parse all accumulated tool calls
+			const firstTool = geminiToolAccumulators[0]
+			if (!fullTextSoFar && !fullReasoningSoFar && !firstTool?.name) {
 				onError({ message: 'Void: Response from model was empty.', fullError: null })
 			} else {
-				if (!toolId) toolId = generateUuid() // ids are empty, but other providers might expect an id
-				const toolCall = rawToolCallObjOfParamsStr(toolName, toolParamsStr, toolId)
+				const allToolCalls: RawToolCallObj[] = []
+				for (const acc of geminiToolAccumulators) {
+					const tc = rawToolCallObjOfParamsStr(acc.name, acc.paramsStr, acc.id)
+					if (tc) allToolCalls.push(tc)
+				}
+				const toolCall = allToolCalls[0] ?? null
 				const toolCallObj = toolCall ? { toolCall } : {}
-				onFinalMessage({ fullText: fullTextSoFar, fullReasoning: fullReasoningSoFar, anthropicReasoning: null, ...toolCallObj });
+				const toolCallsObj = allToolCalls.length > 0 ? { toolCalls: allToolCalls } : {}
+				onFinalMessage({ fullText: fullTextSoFar, fullReasoning: fullReasoningSoFar, anthropicReasoning: null, ...toolCallObj, ...toolCallsObj });
 			}
 		})
 		.catch(error => {
@@ -936,6 +1020,11 @@ export const sendLLMMessageToProviderImplementation = {
 		sendChat: (params) => _sendOpenAICompatibleChat(params),
 		sendFIM: null,
 		list: null,
+	},
+	aiyiwei: {
+		sendChat: (params) => _sendOpenAICompatibleChat(params),
+		sendFIM: null,
+		list: (params) => _openaiCompatibleList(params),
 	},
 
 } satisfies CallFnOfProvider

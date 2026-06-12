@@ -1,20 +1,8 @@
 {
-  "_comment": "【项目配置说明】Void IDE 项目配置，基于 VSCode 1.99.3",
-  "_business_logic": "【业务逻辑】本文件定义项目元数据、依赖、脚本命令",
-  "_key_scripts": {
-    "compile": "编译 TypeScript 到 out/ 目录",
-    "watch": "启动监视模式，自动编译修改",
-    "watch-client": "监视客户端代码（渲染进程）",
-    "watch-extensions": "监视扩展代码",
-    "buildreact": "构建 Void React UI 组件",
-    "electron": "启动 Electron 应用"
-  },
   "name": "code-oss-dev",
   "version": "1.99.3",
   "distro": "21c8d8ea1e46d97c5639a7cabda6c0e063cc8dd5",
-  "author": {
-    "name": "Microsoft Corporation"
-  },
+  "author": "Microsoft Corporation",
   "license": "MIT",
   "main": "./out/main.js",
   "type": "module",
@@ -24,6 +12,7 @@
     "watchreact": "cd ./src/vs/workbench/contrib/void/browser/react/ && node build.js --watch && cd ../../../../../../../",
     "watchreactd": "deemon npm run watchreact",
     "test": "echo Please run any of the test scripts from the scripts folder.",
+    "test-headless": "node test/integration/loopDetection.test.js",
     "test-browser": "npx playwright install && node test/unit/browser/index.js",
     "test-browser-no-install": "node test/unit/browser/index.js",
     "test-node": "mocha test/unit/node/index.js --delay --ui=tdd --timeout=5000 --exit",
@@ -286,7 +275,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/microsoft/vscode.git"
+    "url": "git+https://github.com/microsoft/vscode.git"
   },
   "bugs": {
     "url": "https://github.com/microsoft/vscode/issues"
@@ -294,5 +283,12 @@
   "optionalDependencies": {
     "@parcel/watcher-win32-x64": "^2.5.6",
     "windows-foreground-love": "0.5.0"
-  }
+  },
+  "description": "<div align=\"center\"> \t<img \t\tsrc=\"./src/vs/workbench/browser/parts/editor/media/slice_of_void.png\" \t \talt=\"Void Welcome\" \t\twidth=\"300\" \t \theight=\"300\" \t/> </div>",
+  "directories": {
+    "doc": "docs",
+    "test": "test"
+  },
+  "keywords": [],
+  "homepage": "https://github.com/microsoft/vscode#readme"
 }

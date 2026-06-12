@@ -21,12 +21,14 @@ import { VOID_OPEN_SETTINGS_ACTION_ID } from '../../../voidSettingsPane.js';
 import { ChatMode, displayInfoOfProviderName, FeatureName, isFeatureNameDisabled } from '../../../../../../../workbench/contrib/void/common/voidSettingsTypes.js';
 import { ICommandService } from '../../../../../../../platform/commands/common/commands.js';
 import { WarningBox } from '../void-settings-tsx/WarningBox.js';
+import { t } from '../i18n/index.js';
 import { getModelCapabilities, getIsReasoningEnabledState } from '../../../../common/modelCapabilities.js';
 import { AlertTriangle, File, Ban, Check, ChevronRight, Dot, FileIcon, Pencil, Undo, Undo2, X, Flag, Copy as CopyIcon, Info, CirclePlus, Ellipsis, CircleEllipsis, Folder, ALargeSmall, TypeOutline, Text } from 'lucide-react';
 import { ChatMessage, CheckpointEntry, StagingSelectionItem, ToolMessage } from '../../../../common/chatThreadServiceTypes.js';
 import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, BuiltinToolName, ToolName, LintErrorItem, ToolApprovalType, toolApprovalTypes } from '../../../../common/toolsServiceTypes.js';
 import { CopyButton, EditToolAcceptRejectButtonsHTML, IconShell1, JumpToFileButton, JumpToTerminalButton, StatusIndicator, StatusIndicatorForApplyButton, useApplyStreamState, useEditToolStreamState } from '../markdown/ApplyBlockHoverButtons.js';
 import { IsRunningType } from '../../../chatThreadService.js';
+import { ITurnCheckpointService } from '../../../turnCheckpointService.js';
 import { acceptAllBg, acceptBorder, buttonFontSize, buttonTextColor, rejectAllBg, rejectBg, rejectBorder } from '../../../../common/helpers/colors.js';
 import { builtinToolNames, isABuiltinToolName, MAX_FILE_CHARS_PAGE, MAX_TERMINAL_INACTIVE_TIME } from '../../../../common/prompt/prompts.js';
 import { RawToolCallObj } from '../../../../common/sendLLMMessageTypes.js';
@@ -170,7 +172,7 @@ const ReasoningOptionSlider = ({ featureName }: { featureName: FeatureName }) =>
 
 	if (canTurnOffReasoning && !reasoningBudgetSlider) { // if it's just a on/off toggle without a power slider
 		return <div className='flex items-center gap-x-2'>
-			<span className='text-void-fg-3 text-xs pointer-events-none inline-block w-10 pr-1'>Thinking</span>
+			<span className='text-void-fg-3 text-xs pointer-events-none inline-block w-10 pr-1'>{t('chat.thinking')}</span>
 			<VoidSwitch
 				size='xxs'
 				value={isReasoningEnabled}
@@ -194,7 +196,7 @@ const ReasoningOptionSlider = ({ featureName }: { featureName: FeatureName }) =>
 			: valueIfOff
 
 		return <div className='flex items-center gap-x-2'>
-			<span className='text-void-fg-3 text-xs pointer-events-none inline-block w-10 pr-1'>Thinking</span>
+			<span className='text-void-fg-3 text-xs pointer-events-none inline-block w-10 pr-1'>{t('chat.thinking')}</span>
 			<VoidSlider
 				width={50}
 				size='xs'
@@ -225,7 +227,7 @@ const ReasoningOptionSlider = ({ featureName }: { featureName: FeatureName }) =>
 		const currentEffortCapitalized = currentEffort.charAt(0).toUpperCase() + currentEffort.slice(1, Infinity)
 
 		return <div className='flex items-center gap-x-2'>
-			<span className='text-void-fg-3 text-xs pointer-events-none inline-block w-10 pr-1'>Thinking</span>
+			<span className='text-void-fg-3 text-xs pointer-events-none inline-block w-10 pr-1'>{t('chat.thinking')}</span>
 			<VoidSlider
 				width={30}
 				size='xs'
@@ -866,14 +868,14 @@ const ToolHeaderWrapper = ({
 							className='text-void-warning opacity-90 flex-shrink-0'
 							size={14}
 							data-tooltip-id='void-tooltip'
-							data-tooltip-content={'Error running tool'}
+							data-tooltip-content={t('chat.tools.errorRunningTool')}
 							data-tooltip-place='top'
 						/>}
 						{isRejected && <Ban
 							className='text-void-fg-4 opacity-90 flex-shrink-0'
 							size={14}
 							data-tooltip-id='void-tooltip'
-							data-tooltip-content={'Canceled'}
+							data-tooltip-content={t('chat.tools.canceled')}
 							data-tooltip-place='top'
 						/>}
 						{desc2 && <span className="text-void-fg-4 text-xs" onClick={desc2OnClick}>
@@ -881,7 +883,7 @@ const ToolHeaderWrapper = ({
 						</span>}
 						{numResults !== undefined && (
 							<span className="text-void-fg-4 text-xs ml-auto mr-1">
-								{`${numResults}${hasNextPage ? '+' : ''} result${numResults !== 1 ? 's' : ''}`}
+								{t('chat.tools.resultCount', String(numResults), hasNextPage ? '+' : '', numResults !== 1 ? 's' : '')}
 							</span>
 						)}
 					</div>
@@ -955,16 +957,16 @@ const EditTool = ({ toolMessage, threadId, messageIdx, content }: Parameters<Res
 
 		if (toolMessage.type === 'success' || toolMessage.type === 'rejected') {
 			const { result } = toolMessage
-			componentParams.bottomChildren = <BottomChildren title='Lint errors'>
+			componentParams.bottomChildren = <BottomChildren title={t('chat.tools.lintErrors')}>
 				{result?.lintErrors?.map((error, i) => (
-					<div key={i} className='whitespace-nowrap'>Lines {error.startLineNumber}-{error.endLineNumber}: {error.message}</div>
+					<div key={i} className='whitespace-nowrap'>{t('chat.tools.lintErrorLine', String(error.startLineNumber), String(error.endLineNumber), error.message)}</div>
 				))}
 			</BottomChildren>
 		}
 		else if (toolMessage.type === 'tool_error') {
 			// error
 			const { result } = toolMessage
-			componentParams.bottomChildren = <BottomChildren title='Error'>
+			componentParams.bottomChildren = <BottomChildren title={t('chat.tools.error')}>
 				<CodeChildren>
 					{result}
 				</CodeChildren>
@@ -1021,6 +1023,7 @@ const UserMessageComponent = ({ chatMessage, messageIdx, isCheckpointGhost, curr
 
 	const accessor = useAccessor()
 	const chatThreadsService = accessor.get('IChatThreadService')
+	const turnCheckpointService = accessor.get('ITurnCheckpointService')
 
 	// global state
 	let isBeingEdited = false
@@ -1153,7 +1156,7 @@ const UserMessageComponent = ({ chatMessage, messageIdx, isCheckpointGhost, curr
 				enableAtToMention
 				ref={setTextAreaRef}
 				className='min-h-[81px] max-h-[500px] px-0.5'
-				placeholder="Edit your message..."
+				placeholder={t('chat.editMessagePlaceholder')}
 				onChangeText={(text) => setIsDisabled(!text)}
 				onFocus={() => {
 					setIsFocused(true)
@@ -1200,11 +1203,30 @@ const UserMessageComponent = ({ chatMessage, messageIdx, isCheckpointGhost, curr
 
 
 		<div
-			className="absolute -top-1 -right-1 translate-x-0 -translate-y-0 z-1"
-		// data-tooltip-id='void-tooltip'
-		// data-tooltip-content='Edit message'
-		// data-tooltip-place='left'
+			className="absolute -top-1 -right-1 translate-x-0 -translate-y-0 z-1 flex gap-0.5"
 		>
+			{/* Revert button — only shown when turnId exists and message is in display mode */}
+			{chatMessage.turnId && mode === 'display' && <Undo2
+				size={18}
+				className={`
+                    cursor-pointer
+                    p-[2px]
+                    bg-void-bg-1 border border-void-border-1 rounded-md
+                    transition-opacity duration-200 ease-in-out
+                    ${isHovered ? 'opacity-100' : 'opacity-0'}
+                `}
+				onClick={async (e) => {
+					e.stopPropagation()
+					if (!chatMessage.turnId) return
+					const result = await turnCheckpointService.revertTo(chatMessage.turnId)
+					if (result.unrevertableCommands.length > 0) {
+						console.warn('[TurnCheckpoint] Unrevertable commands:', result.unrevertableCommands)
+					}
+					if (result.conflicts.length > 0) {
+						console.warn('[TurnCheckpoint] Conflicts:', result.conflicts)
+					}
+				}}
+			/>}
 			<EditSymbol
 				size={18}
 				className={`
@@ -1381,7 +1403,7 @@ const ReasoningWrapper = ({ isDoneReasoning, isStreaming, children }: { isDoneRe
 	useEffect(() => {
 		if (!isWriting) setIsOpen(false) // if just finished reasoning, close
 	}, [isWriting])
-	return <ToolHeaderWrapper title='Reasoning' desc1={isWriting ? <IconLoading /> : ''} isOpen={isOpen} onClick={() => setIsOpen(v => !v)}>
+	return <ToolHeaderWrapper title={t('chat.tools.reasoning')} desc1={isWriting ? <IconLoading /> : ''} isOpen={isOpen} onClick={() => setIsOpen(v => !v)}>
 		<ToolChildrenWrapper>
 			<div className='!select-text cursor-auto'>
 				{children}
@@ -1403,53 +1425,49 @@ const loadingTitleWrapper = (item: React.ReactNode): React.ReactNode => {
 }
 
 const titleOfBuiltinToolName = {
-	'read_file': { done: 'Read file', proposed: 'Read file', running: loadingTitleWrapper('Reading file') },
-	'ls_dir': { done: 'Inspected folder', proposed: 'Inspect folder', running: loadingTitleWrapper('Inspecting folder') },
-	'get_dir_tree': { done: 'Inspected folder tree', proposed: 'Inspect folder tree', running: loadingTitleWrapper('Inspecting folder tree') },
-	'search_pathnames_only': { done: 'Searched by file name', proposed: 'Search by file name', running: loadingTitleWrapper('Searching by file name') },
-	'search_for_files': { done: 'Searched', proposed: 'Search', running: loadingTitleWrapper('Searching') },
-	'create_file_or_folder': { done: `Created`, proposed: `Create`, running: loadingTitleWrapper(`Creating`) },
-	'delete_file_or_folder': { done: `Deleted`, proposed: `Delete`, running: loadingTitleWrapper(`Deleting`) },
-	'edit_file': { done: `Edited file`, proposed: 'Edit file', running: loadingTitleWrapper('Editing file') },
-	'rewrite_file': { done: `Wrote file`, proposed: 'Write file', running: loadingTitleWrapper('Writing file') },
-	'run_command': { done: `Ran terminal`, proposed: 'Run terminal', running: loadingTitleWrapper('Running terminal') },
-	'run_persistent_command': { done: `Ran terminal`, proposed: 'Run terminal', running: loadingTitleWrapper('Running terminal') },
+	'read_file': { done: t('chat.tools.read_file.done'), proposed: t('chat.tools.read_file.proposed'), running: loadingTitleWrapper(t('chat.tools.read_file.running')) },
+	'ls_dir': { done: t('chat.tools.ls_dir.done'), proposed: t('chat.tools.ls_dir.proposed'), running: loadingTitleWrapper(t('chat.tools.ls_dir.running')) },
+	'get_dir_tree': { done: t('chat.tools.get_dir_tree.done'), proposed: t('chat.tools.get_dir_tree.proposed'), running: loadingTitleWrapper(t('chat.tools.get_dir_tree.running')) },
+	'search_pathnames_only': { done: t('chat.tools.search_pathnames_only.done'), proposed: t('chat.tools.search_pathnames_only.proposed'), running: loadingTitleWrapper(t('chat.tools.search_pathnames_only.running')) },
+	'search_for_files': { done: t('chat.tools.search_for_files.done'), proposed: t('chat.tools.search_for_files.proposed'), running: loadingTitleWrapper(t('chat.tools.search_for_files.running')) },
+	'create_file_or_folder': { done: t('chat.tools.create_file_or_folder.done'), proposed: t('chat.tools.create_file_or_folder.proposed'), running: loadingTitleWrapper(t('chat.tools.create_file_or_folder.running')) },
+	'delete_file_or_folder': { done: t('chat.tools.delete_file_or_folder.done'), proposed: t('chat.tools.delete_file_or_folder.proposed'), running: loadingTitleWrapper(t('chat.tools.delete_file_or_folder.running')) },
+	'edit_file': { done: t('chat.tools.edit_file.done'), proposed: t('chat.tools.edit_file.proposed'), running: loadingTitleWrapper(t('chat.tools.edit_file.running')) },
+	'rewrite_file': { done: t('chat.tools.rewrite_file.done'), proposed: t('chat.tools.rewrite_file.proposed'), running: loadingTitleWrapper(t('chat.tools.rewrite_file.running')) },
+	'run_command': { done: t('chat.tools.run_command.done'), proposed: t('chat.tools.run_command.proposed'), running: loadingTitleWrapper(t('chat.tools.run_command.running')) },
+	'run_persistent_command': { done: t('chat.tools.run_persistent_command.done'), proposed: t('chat.tools.run_persistent_command.proposed'), running: loadingTitleWrapper(t('chat.tools.run_persistent_command.running')) },
 
-	'open_persistent_terminal': { done: `Opened terminal`, proposed: 'Open terminal', running: loadingTitleWrapper('Opening terminal') },
-	'kill_persistent_terminal': { done: `Killed terminal`, proposed: 'Kill terminal', running: loadingTitleWrapper('Killing terminal') },
+	'open_persistent_terminal': { done: t('chat.tools.open_persistent_terminal.done'), proposed: t('chat.tools.open_persistent_terminal.proposed'), running: loadingTitleWrapper(t('chat.tools.open_persistent_terminal.running')) },
+	'kill_persistent_terminal': { done: t('chat.tools.kill_persistent_terminal.done'), proposed: t('chat.tools.kill_persistent_terminal.proposed'), running: loadingTitleWrapper(t('chat.tools.kill_persistent_terminal.running')) },
 
-	'read_lint_errors': { done: `Read lint errors`, proposed: 'Read lint errors', running: loadingTitleWrapper('Reading lint errors') },
-	'search_in_file': { done: 'Searched in file', proposed: 'Search in file', running: loadingTitleWrapper('Searching in file') },
+	'read_lint_errors': { done: t('chat.tools.read_lint_errors.done'), proposed: t('chat.tools.read_lint_errors.proposed'), running: loadingTitleWrapper(t('chat.tools.read_lint_errors.running')) },
+	'search_in_file': { done: t('chat.tools.search_in_file.done'), proposed: t('chat.tools.search_in_file.proposed'), running: loadingTitleWrapper(t('chat.tools.search_in_file.running')) },
 } as const satisfies Record<BuiltinToolName, { done: any, proposed: any, running: any }>
 
 
 const getTitle = (toolMessage: Pick<ChatMessage & { role: 'tool' }, 'name' | 'type' | 'mcpServerName'>): React.ReactNode => {
-	const t = toolMessage
+	const msg = toolMessage
 
 	// non-built-in title
-	if (!builtinToolNames.includes(t.name as BuiltinToolName)) {
+	if (!builtinToolNames.includes(msg.name as BuiltinToolName)) {
 		// descriptor of Running or Ran etc
 		const descriptor =
-			t.type === 'success' ? 'Called'
-				: t.type === 'running_now' ? 'Calling'
-					: t.type === 'tool_request' ? 'Call'
-						: t.type === 'rejected' ? 'Call'
-							: t.type === 'invalid_params' ? 'Call'
-								: t.type === 'tool_error' ? 'Call'
-									: 'Call'
+			msg.type === 'success' ? t('chat.tools.called')
+				: msg.type === 'running_now' ? t('chat.tools.calling')
+					: t('chat.tools.call')
 
 
-		const title = `${descriptor} ${toolMessage.mcpServerName || 'MCP'}`
-		if (t.type === 'running_now' || t.type === 'tool_request')
+		const title = `${descriptor} ${toolMessage.mcpServerName || t('chat.tools.mcp')}`
+		if (msg.type === 'running_now' || msg.type === 'tool_request')
 			return loadingTitleWrapper(title)
 		return title
 	}
 
 	// built-in title
 	else {
-		const toolName = t.name as BuiltinToolName
-		if (t.type === 'success') return titleOfBuiltinToolName[toolName].done
-		if (t.type === 'running_now') return titleOfBuiltinToolName[toolName].running
+		const toolName = msg.name as BuiltinToolName
+		if (msg.type === 'success') return titleOfBuiltinToolName[toolName].done
+		if (msg.type === 'running_now') return titleOfBuiltinToolName[toolName].running
 		return titleOfBuiltinToolName[toolName].proposed
 	}
 }
@@ -1626,14 +1644,68 @@ const ToolRequestAcceptRejectButtons = ({ toolName }: { toolName: ToolName }) =>
 	)
 
 	const approvalType = isABuiltinToolName(toolName) ? approvalTypeOfBuiltinToolName[toolName] : 'MCP tools'
-	const approvalToggle = approvalType ? <div key={approvalType} className="flex items-center ml-2 gap-x-1">
-		<ToolApprovalTypeSwitch size='xs' approvalType={approvalType} desc={`Auto-approve ${approvalType}`} />
+
+	// 计算此审批类型对应的 AutoApproveSettings 增量 + 对应的作用域 i18n key
+	const buildTrustDelta = (): { delta: import('../../../../common/voidSettingsTypes.js').AutoApproveSettings, scopeKey: string } | null => {
+		if (approvalType === 'edits') return { delta: { editsInWorkspace: true, editsOutsideWorkspace: true }, scopeKey: 'chat.tool.trust.scope.editsInWorkspace' }
+		if (approvalType === 'terminal') return { delta: { terminalAny: true }, scopeKey: 'chat.tool.trust.scope.terminalAny' }
+		if (approvalType === 'MCP tools') return { delta: { mcpAll: true }, scopeKey: 'chat.tool.trust.scope.mcpAll' }
+		return null
+	}
+	const trust = buildTrustDelta()
+
+	const onTrustSession = useCallback(() => {
+		if (!trust) return
+		try {
+			const threadId = chatThreadsService.state.currentThreadId
+			chatThreadsService.setSessionAutoApprove(threadId, trust.delta)
+			chatThreadsService.approveLatestToolRequest(threadId)
+			metricsService.capture('Tool Trust Session', { approvalType })
+		} catch (e) { console.error('Error while trusting tool kind (session):', e) }
+	}, [trust, chatThreadsService, metricsService, approvalType])
+
+	const onTrustPermanent = useCallback(() => {
+		if (!trust) return
+		try {
+			const cur = voidSettingsService.state.globalSettings.autoApprove
+			voidSettingsService.setGlobalSetting('autoApprove', { ...cur, ...trust.delta })
+			const threadId = chatThreadsService.state.currentThreadId
+			chatThreadsService.approveLatestToolRequest(threadId)
+			metricsService.capture('Tool Trust Permanent', { approvalType })
+		} catch (e) { console.error('Error while trusting tool kind (permanent):', e) }
+	}, [trust, voidSettingsService, chatThreadsService, metricsService, approvalType])
+
+	const trustButtons = trust ? <div className='flex items-center gap-1 ml-2'>
+		<button
+			onClick={onTrustSession}
+			title={t('chat.tool.trust.sessionHint', t(trust.scopeKey as any))}
+			className={`
+				px-2 py-1 text-xs rounded
+				bg-[var(--vscode-button-secondaryBackground)]
+				text-[var(--vscode-button-secondaryForeground)]
+				hover:bg-[var(--vscode-button-secondaryHoverBackground)]
+			`}
+		>
+			{t('chat.tool.trust.session')}
+		</button>
+		<button
+			onClick={onTrustPermanent}
+			title={t('chat.tool.trust.permanentHint', t(trust.scopeKey as any))}
+			className={`
+				px-2 py-1 text-xs rounded
+				bg-[var(--vscode-button-secondaryBackground)]
+				text-[var(--vscode-button-secondaryForeground)]
+				hover:bg-[var(--vscode-button-secondaryHoverBackground)]
+			`}
+		>
+			{t('chat.tool.trust.permanent')}
+		</button>
 	</div> : null
 
-	return <div className="flex gap-2 mx-0.5 items-center">
+	return <div className="flex gap-2 mx-0.5 items-center flex-wrap">
 		{approveButton}
 		{cancelButton}
-		{approvalToggle}
+		{trustButtons}
 	</div>
 }
 
@@ -1686,7 +1758,7 @@ const EditToolChildren = ({ uri, code, type }: { uri: URI | undefined, code: str
 const LintErrorChildren = ({ lintErrors }: { lintErrors: LintErrorItem[] }) => {
 	return <div className="text-xs text-void-fg-4 opacity-80 border-l-2 border-void-warning px-2 py-0.5 flex flex-col gap-0.5 overflow-x-auto whitespace-nowrap">
 		{lintErrors.map((error, i) => (
-			<div key={i}>Lines {error.startLineNumber}-{error.endLineNumber}: {error.message}</div>
+			<div key={i}>{t('chat.tools.lintErrorLine', String(error.startLineNumber), String(error.endLineNumber), error.message)}</div>
 		))}
 	</div>
 }
@@ -1842,7 +1914,7 @@ const CommandTool = ({ toolMessage, type, threadId }: { threadId: string } & ({
 	}
 	else if (toolMessage.type === 'tool_error') {
 		const { result } = toolMessage
-		componentParams.bottomChildren = <BottomChildren title='Error'>
+		componentParams.bottomChildren = <BottomChildren title={t('chat.tools.error')}>
 			<CodeChildren>
 				{result}
 			</CodeChildren>
@@ -1901,7 +1973,7 @@ const MCPToolWrapper = ({ toolMessage }: WrapperProps<string>) => {
 	}
 	else if (toolMessage.type === 'tool_error') {
 		const { result } = toolMessage
-		componentParams.bottomChildren = <BottomChildren title='Error'>
+		componentParams.bottomChildren = <BottomChildren title={t('chat.tools.error')}>
 			<CodeChildren>
 				{result}
 			</CodeChildren>
@@ -1946,14 +2018,14 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 				const { result } = toolMessage
 				componentParams.onClick = () => { voidOpenFileFn(params.uri, accessor, range) }
 				if (result.hasNextPage && params.pageNumber === 1)  // first page
-					componentParams.desc2 = `(truncated after ${Math.round(MAX_FILE_CHARS_PAGE) / 1000}k)`
+					componentParams.desc2 = t('chat.tools.truncatedAfter', String(Math.round(MAX_FILE_CHARS_PAGE) / 1000))
 				else if (params.pageNumber > 1) // subsequent pages
-					componentParams.desc2 = `(part ${params.pageNumber})`
+					componentParams.desc2 = t('chat.tools.partPage', String(params.pageNumber))
 			}
 			else if (toolMessage.type === 'tool_error') {
 				const { result } = toolMessage
 				// JumpToFileButton removed in favor of FileLinkText
-				componentParams.bottomChildren = <BottomChildren title='Error'>
+				componentParams.bottomChildren = <BottomChildren title={t('chat.tools.error')}>
 					<CodeChildren>
 						{result}
 					</CodeChildren>
@@ -2000,7 +2072,7 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 			}
 			else if (toolMessage.type === 'tool_error') {
 				const { result } = toolMessage
-				componentParams.bottomChildren = <BottomChildren title='Error'>
+				componentParams.bottomChildren = <BottomChildren title={t('chat.tools.error')}>
 					<CodeChildren>
 						{result}
 					</CodeChildren>
@@ -2049,13 +2121,13 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 							}}
 						/>))}
 						{result.hasNextPage &&
-							<ListableToolItem name={`Results truncated (${result.itemsRemaining} remaining).`} isSmall={true} className='w-full overflow-auto' />
+							<ListableToolItem name={t('chat.tools.resultsTruncatedWithCount', String(result.itemsRemaining))} isSmall={true} className='w-full overflow-auto' />
 						}
 					</ToolChildrenWrapper>
 			}
 			else if (toolMessage.type === 'tool_error') {
 				const { result } = toolMessage
-				componentParams.bottomChildren = <BottomChildren title='Error'>
+				componentParams.bottomChildren = <BottomChildren title={t('chat.tools.error')}>
 					<CodeChildren>
 						{result}
 					</CodeChildren>
@@ -2097,14 +2169,14 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 							onClick={() => { voidOpenFileFn(uri, accessor) }}
 						/>))}
 						{result.hasNextPage &&
-							<ListableToolItem name={'Results truncated.'} isSmall={true} className='w-full overflow-auto' />
+							<ListableToolItem name={t('chat.tools.resultsTruncated')} isSmall={true} className='w-full overflow-auto' />
 						}
 
 					</ToolChildrenWrapper>
 			}
 			else if (toolMessage.type === 'tool_error') {
 				const { result } = toolMessage
-				componentParams.bottomChildren = <BottomChildren title='Error'>
+				componentParams.bottomChildren = <BottomChildren title={t('chat.tools.error')}>
 					<CodeChildren>
 						{result}
 					</CodeChildren>
@@ -2152,14 +2224,14 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 							onClick={() => { voidOpenFileFn(uri, accessor) }}
 						/>))}
 						{result.hasNextPage &&
-							<ListableToolItem name={`Results truncated.`} isSmall={true} className='w-full overflow-auto' />
+							<ListableToolItem name={t('chat.tools.resultsTruncated')} isSmall={true} className='w-full overflow-auto' />
 						}
 
 					</ToolChildrenWrapper>
 			}
 			else if (toolMessage.type === 'tool_error') {
 				const { result } = toolMessage
-				componentParams.bottomChildren = <BottomChildren title='Error'>
+				componentParams.bottomChildren = <BottomChildren title={t('chat.tools.error')}>
 					<CodeChildren>
 						{result}
 					</CodeChildren>
@@ -2188,7 +2260,7 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 			const infoarr: string[] = []
 			const uriStr = getRelative(params.uri, accessor)
 			if (uriStr) infoarr.push(uriStr)
-			if (params.isRegex) infoarr.push('Uses regex search')
+			if (params.isRegex) infoarr.push(t('chat.tools.usesRegex'))
 			componentParams.info = infoarr.join('; ')
 
 			if (toolMessage.type === 'success') {
@@ -2205,7 +2277,7 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 			}
 			else if (toolMessage.type === 'tool_error') {
 				const { result } = toolMessage;
-				componentParams.bottomChildren = <BottomChildren title='Error'>
+				componentParams.bottomChildren = <BottomChildren title={t('chat.tools.error')}>
 					<CodeChildren>
 						{result}
 					</CodeChildren>
@@ -2243,13 +2315,13 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 				if (result.lintErrors)
 					componentParams.children = <LintErrorChildren lintErrors={result.lintErrors} />
 				else
-					componentParams.children = `No lint errors found.`
+					componentParams.children = t('chat.tools.noLintErrors')
 
 			}
 			else if (toolMessage.type === 'tool_error') {
 				const { result } = toolMessage
 				// JumpToFileButton removed in favor of FileLinkText
-				componentParams.bottomChildren = <BottomChildren title='Error'>
+				componentParams.bottomChildren = <BottomChildren title={t('chat.tools.error')}>
 					<CodeChildren>
 						{result}
 					</CodeChildren>
@@ -2288,7 +2360,7 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 			else if (toolMessage.type === 'tool_error') {
 				const { result } = toolMessage
 				if (params) { componentParams.onClick = () => { voidOpenFileFn(params.uri, accessor) } }
-				componentParams.bottomChildren = <BottomChildren title='Error'>
+				componentParams.bottomChildren = <BottomChildren title={t('chat.tools.error')}>
 					<CodeChildren>
 						{result}
 					</CodeChildren>
@@ -2330,7 +2402,7 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 			else if (toolMessage.type === 'tool_error') {
 				const { result } = toolMessage
 				if (params) { componentParams.onClick = () => { voidOpenFileFn(params.uri, accessor) } }
-				componentParams.bottomChildren = <BottomChildren title='Error'>
+				componentParams.bottomChildren = <BottomChildren title={t('chat.tools.error')}>
 					<CodeChildren>
 						{result}
 					</CodeChildren>
@@ -2390,7 +2462,7 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 			const componentParams: ToolHeaderParams = { title, desc1, desc1Info, isError, icon, isRejected, }
 
 			const relativePath = params.cwd ? getRelative(URI.file(params.cwd), accessor) : ''
-			componentParams.info = relativePath ? `Running in ${relativePath}` : undefined
+			componentParams.info = relativePath ? t('chat.tools.runningIn', relativePath) : undefined
 
 			if (toolMessage.type === 'success') {
 				const { result } = toolMessage
@@ -2400,7 +2472,7 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 			}
 			else if (toolMessage.type === 'tool_error') {
 				const { result } = toolMessage
-				componentParams.bottomChildren = <BottomChildren title='Error'>
+				componentParams.bottomChildren = <BottomChildren title={t('chat.tools.error')}>
 					<CodeChildren>
 						{result}
 					</CodeChildren>
@@ -2435,7 +2507,7 @@ const builtinToolNameToComponent: { [T in BuiltinToolName]: { resultWrapper: Res
 			}
 			else if (toolMessage.type === 'tool_error') {
 				const { result } = toolMessage
-				componentParams.bottomChildren = <BottomChildren title='Error'>
+				componentParams.bottomChildren = <BottomChildren title={t('chat.tools.error')}>
 					<CodeChildren>
 						{result}
 					</CodeChildren>
@@ -2674,7 +2746,7 @@ const CommandBarInChat = () => {
 			}}
 			data-tooltip-id='void-tooltip'
 			data-tooltip-place='top'
-			data-tooltip-content='Reject all'
+			data-tooltip-content={t('chat.tools.rejectAll')}
 		/>
 
 		<IconShell1 // AcceptAllButtonWrapper
@@ -2693,7 +2765,7 @@ const CommandBarInChat = () => {
 			}}
 			data-tooltip-id='void-tooltip'
 			data-tooltip-place='top'
-			data-tooltip-content='Accept all'
+			data-tooltip-content={t('chat.tools.acceptAll')}
 		/>
 
 
@@ -2741,14 +2813,14 @@ const CommandBarInChat = () => {
 					uri={uri}
 					data-tooltip-id='void-tooltip'
 					data-tooltip-place='top'
-					data-tooltip-content='Go to file'
+					data-tooltip-content={t('chat.tools.goToFile')}
 				/> */}
 				<IconShell1 // RejectAllButtonWrapper
 					Icon={X}
 					onClick={() => { editCodeService.acceptOrRejectAllDiffAreas({ uri, removeCtrlKs: true, behavior: "reject", _addToHistory: true, }); }}
 					data-tooltip-id='void-tooltip'
 					data-tooltip-place='top'
-					data-tooltip-content='Reject file'
+					data-tooltip-content={t('chat.tools.rejectFile')}
 
 				/>
 				<IconShell1 // AcceptAllButtonWrapper
@@ -2756,7 +2828,7 @@ const CommandBarInChat = () => {
 					onClick={() => { editCodeService.acceptOrRejectAllDiffAreas({ uri, removeCtrlKs: true, behavior: "accept", _addToHistory: true, }); }}
 					data-tooltip-id='void-tooltip'
 					data-tooltip-place='top'
-					data-tooltip-content='Accept file'
+					data-tooltip-content={t('chat.tools.acceptFile')}
 				/>
 
 			</div>
@@ -3046,7 +3118,7 @@ export const SidebarChat = () => {
 					showDismiss={true}
 				/>
 
-				<WarningBox className='text-sm my-2 mx-4' onClick={() => { commandService.executeCommand(VOID_OPEN_SETTINGS_ACTION_ID) }} text='Open settings' />
+				<WarningBox className='text-sm my-2 mx-4' onClick={() => { commandService.executeCommand(VOID_OPEN_SETTINGS_ACTION_ID) }} textKey='common.openSettings' />
 			</div>
 		}
 	</ScrollToBottomContainer>
@@ -3078,7 +3150,7 @@ export const SidebarChat = () => {
 		<VoidInputBox2
 			enableAtToMention
 			className={`min-h-[81px] px-0.5 py-0.5`}
-			placeholder={`@ to mention, ${keybindingString ? `${keybindingString} to add a selection. ` : ''}Enter instructions...`}
+			placeholder={t('chat.inputPlaceholder', keybindingString ? `${keybindingString} ` : '')}
 			onChangeText={onChangeText}
 			onKeyDown={onKeyDown}
 			onFocus={() => { chatThreadsService.setCurrentlyFocusedMessageIdx(undefined) }}
@@ -3095,9 +3167,9 @@ export const SidebarChat = () => {
 
 	const initiallySuggestedPromptsHTML = <div className='flex flex-col gap-2 w-full text-nowrap text-void-fg-3 select-none'>
 		{[
-			'Summarize my codebase',
-			'How do types work in Rust?',
-			'Create a .voidrules file for me'
+			t('chat.suggestions.summarize'),
+			t('chat.suggestions.rustTypes'),
+			t('chat.suggestions.voidrules')
 		].map((text, index) => (
 			<div
 				key={index}
@@ -3136,12 +3208,12 @@ export const SidebarChat = () => {
 
 		{Object.keys(chatThreadsState.allThreads).length > 1 ? // show if there are threads
 			<ErrorBoundary>
-				<div className='pt-8 mb-2 text-void-fg-3 text-root select-none pointer-events-none'>Previous Threads</div>
+				<div className='pt-8 mb-2 text-void-fg-3 text-root select-none pointer-events-none'>{t('chat.previousThreads')}</div>
 				<PastThreadsList />
 			</ErrorBoundary>
 			:
 			<ErrorBoundary>
-				<div className='pt-8 mb-2 text-void-fg-3 text-root select-none pointer-events-none'>Suggestions</div>
+				<div className='pt-8 mb-2 text-void-fg-3 text-root select-none pointer-events-none'>{t('chat.suggestions')}</div>
 				{initiallySuggestedPromptsHTML}
 			</ErrorBoundary>
 		}
