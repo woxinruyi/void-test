@@ -15,6 +15,9 @@ import { ITerminalService, ITerminalInstance, ICreateTerminalOptions } from '../
 import { MAX_TERMINAL_BG_COMMAND_TIME, MAX_TERMINAL_CHARS, MAX_TERMINAL_INACTIVE_TIME } from '../common/prompt/prompts.js';
 import { TerminalResolveReason } from '../common/toolsServiceTypes.js';
 import { timeout } from '../../../../base/common/async.js';
+import { isLinux, isMacintosh } from '../../../../base/common/platform.js';
+import { IVoidSettingsService } from '../common/voidSettingsService.js';
+import { wrapCommandForSandbox } from '../common/helpers/sandboxArgs.js';
 
 
 
@@ -94,6 +97,7 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 	constructor(
 		@ITerminalService private readonly terminalService: ITerminalService,
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
+		@IVoidSettingsService private readonly voidSettingsService: IVoidSettingsService,
 	) {
 		super();
 
@@ -334,8 +338,17 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 			})
 
 
+			// 一次性命令按沙箱档位包装（默认 full 原样返回；持久终端不包装，以保跨命令状态连续）。
+			// 隔离真实生效需目标 OS + 已装 bwrap/sandbox-exec，见 add-terminal-sandbox（待本机验证）。
+			const sandboxMode = this.voidSettingsService.state.globalSettings.terminalSandboxMode ?? 'full'
+			const platform = isLinux ? 'linux' : isMacintosh ? 'darwin' : 'win32'
+			const wsDir = this.workspaceContextService.getWorkspace().folders[0]?.uri?.fsPath ?? ''
+			const commandToSend = (!isPersistent && sandboxMode !== 'full')
+				? wrapCommandForSandbox(command, { mode: sandboxMode, platform, workspaceDir: wsDir })
+				: command
+
 			// send the command now that listeners are attached
-			await terminal.sendText(command, true)
+			await terminal.sendText(commandToSend, true)
 
 			const waitUntilInterrupt = isPersistent ?
 				// timeout after X seconds

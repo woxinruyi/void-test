@@ -42,6 +42,7 @@
 
 import { defaultModelsOfProvider, defaultProviderSettings, ModelOverrides } from './modelCapabilities.js';
 import { VoidSettingsState } from './voidSettingsService.js'
+import { SandboxMode } from './helpers/sandboxArgs.js'
 
 
 type UnionOfKeys<T> = T extends T ? keyof T : never;
@@ -653,6 +654,10 @@ export type GlobalSettings = {
 
 	// Anthropic Prompt 缓存（add-prompt-caching）：直连 Anthropic 路径为 tools/system 注入 cache_control
 	anthropicPromptCaching: boolean;
+
+	// 终端沙箱档位（add-terminal-sandbox）：对一次性 run_command 用 bwrap(Linux)/sandbox-exec(macOS) 隔离。
+	// 默认 'full'（不隔离，行为同历史，零回退）；'read-only'/'workspace-write' 为实验性，需目标 OS + 已装 bwrap，隔离真实生效需本机验证。
+	terminalSandboxMode: SandboxMode;
 }
 
 export const defaultGlobalSettings: GlobalSettings = {
@@ -686,6 +691,8 @@ export const defaultGlobalSettings: GlobalSettings = {
 	smitheryApiKey: '',
 
 	anthropicPromptCaching: true,
+
+	terminalSandboxMode: 'full',
 }
 
 export type GlobalSettingName = keyof GlobalSettings

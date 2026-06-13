@@ -53,8 +53,9 @@
   - `buildBwrapArgs`（Linux）/ `buildSeatbeltProfile`（macOS）/ 能力位，三档语义；
   - `wrapCommandForSandbox(command, {mode, platform, workspaceDir})` —— 把一次性命令包装为 `bwrap … -- /bin/bash -c '<cmd>'`（Linux）/ `sandbox-exec -p '<profile>' /bin/bash -c '<cmd>'`（macOS），`full`/win32 优雅原样返回；含 POSIX 单引号安全转义 `shellSingleQuote`。
   - `sandboxArgsEval.ts`（20/20）+ `sandboxArgs.test.ts`。**这是 sendText 接线将直接调用的构件，已逐字测试。**
-- **仅剩运行时部分（环境门槛）**：
-  - `terminalToolService.runCommand` 在 `mode!=='full'` 且一次性命令时改用 `wrapCommandForSandbox(...)` 后再 `sendText`（一行接线，但**需目标 OS + 已安装 bwrap 才能验证隔离真实生效**，故不在无运行时环境提交未验证接线）；
-  - `terminalSandboxMode` 设置项 + onboarding 信任档；
-  - `sandbox_denied` → 升级审批流；Windows 后端（作业对象/AppContainer）；真机端到端隔离验证。
+- **运行时接线已执行（默认 OFF，零回退）**：
+  - `voidSettingsTypes`：新增 `terminalSandboxMode: SandboxMode`，**默认 `'full'`（不隔离 = 历史行为）**。
+  - `terminalToolService.runCommand`：一次性命令在 `mode!=='full'` 时经 `wrapCommandForSandbox(command, {mode, platform(isLinux/isMacintosh), workspaceDir})` 包装后再 `sendText`；持久终端不包装（保状态连续）。代码经 tsc + wrapper 单测验证。
+  - **唯一待本机验证项**：在目标 OS（已装 bwrap/sandbox-exec）下确认隔离*真实生效*——这是 bwrap/OS 的属性而非本代码正确性；默认 OFF 故对现有用户零影响，用户显式切档并自行验证后启用。
+- **仍剩（后续增强）**：`sandbox_denied` → 升级审批流；Windows 后端（作业对象/AppContainer）；设置 UI + onboarding 信任档接入。
 - 在运行时沙箱落地前，现有 allowlist + shell-metachar 防御 + dangerous 清单为既有缓解。
