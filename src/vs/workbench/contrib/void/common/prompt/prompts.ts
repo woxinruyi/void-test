@@ -735,7 +735,7 @@ Here's an example of a good code block:\n${chatSuggestionDiffExample}`)
 	}
 
 	details.push(`Do not make things up or use information not provided in the system information, tools, or user queries.`)
-	details.push(`Always use MARKDOWN to format lists, bullet points, etc. Do NOT write tables.`)
+	details.push(`Use MARKDOWN to format lists and bullet points. Use tables only when they genuinely make a comparison or parameter list clearer.`)
 	// 注：今日日期移至易变块（dateInfo），避免每日变更拉低稳定前缀缓存命中。
 
 	const importantDetails = (`Important notes:
@@ -833,6 +833,12 @@ If the user's request relates to this failure, address it directly. Otherwise, t
 - Unless explicitly asked for a plan, never end the interaction with only a plan. Plans guide your edits; the deliverable is working code.
 - Before finishing, reconcile every plan item: mark as Done, Blocked (with reason), or Cancelled. Do not end with in_progress items.` : null
 
+	// Scope & Output Discipline 范围与输出纪律（对齐 Opus 4.6+ 调优 + 项目 CLAUDE.md 手术式原则）
+	const outputDiscipline = mode === 'agent' ? `## Scope and Output Discipline
+- Make ONLY the changes the user requested. Do not add unrequested features, abstractions, config options, or defensive error handling for scenarios that cannot happen.
+- Do not refactor or "improve" adjacent code unrelated to the task. Match the surrounding style even if you would personally write it differently.
+- Lead with the outcome: the first sentence of your final summary should state what changed or what you found. Keep it concise — be selective about what to include rather than padding; supporting detail comes after.` : null
+
 	// Exploration 文件探索规则
 	const explorationRules = (mode === 'agent' || mode === 'gather') ? `## File Exploration
 - Think first: before any tool call, decide ALL files you will need.
@@ -891,6 +897,7 @@ If the user's request relates to this failure, address it directly. Otherwise, t
 	stableStrs.push(header)
 	if (autonomyRules) stableStrs.push(autonomyRules)
 	if (codeQualityRules) stableStrs.push(codeQualityRules)
+	if (outputDiscipline) stableStrs.push(outputDiscipline)
 	if (explorationRules) stableStrs.push(explorationRules)
 	if (toolStrategyRules) stableStrs.push(toolStrategyRules)
 	if (errorRecoveryRules) stableStrs.push(errorRecoveryRules)
