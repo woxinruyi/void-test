@@ -93,3 +93,6 @@ scripts/probe-out*.json
 scripts/screenshot.png
 # 本地工具配置
 .pilotdeck/
+
+# playwright-mcp browser session artifacts (not source)
+.playwright-mcp/
