@@ -4,7 +4,7 @@
  *  运行：npx tsx src/vs/workbench/contrib/void/test/eval/sandboxArgsEval.ts
  *--------------------------------------------------------------------------------------*/
 
-import { buildBwrapArgs, buildSeatbeltProfile, sandboxAllowsNetwork, sandboxAllowsOutsideWorkspaceWrite } from '../../common/helpers/sandboxArgs.js'
+import { buildBwrapArgs, buildSeatbeltProfile, sandboxAllowsNetwork, sandboxAllowsOutsideWorkspaceWrite, wrapCommandForSandbox, shellSingleQuote } from '../../common/helpers/sandboxArgs.js'
 
 const results: { name: string, pass: boolean, detail: string }[] = []
 const rec = (name: string, pass: boolean, detail = '') => results.push({ name, pass, detail })
@@ -42,6 +42,23 @@ rec('seatbelt full → null', buildSeatbeltProfile({ workspaceDir: WS, mode: 'fu
 // --- 能力位 ---
 rec('网络仅 full 放开', !sandboxAllowsNetwork('read-only') && !sandboxAllowsNetwork('workspace-write') && sandboxAllowsNetwork('full'))
 rec('工作区外写仅 full', !sandboxAllowsOutsideWorkspaceWrite('workspace-write') && sandboxAllowsOutsideWorkspaceWrite('full'))
+
+// --- 命令包装 ---
+rec('shellSingleQuote 转义单引号', shellSingleQuote(`a'b`) === `'a'\\''b'`, shellSingleQuote(`a'b`))
+rec('full → 原样返回', wrapCommandForSandbox('npm test', { mode: 'full', platform: 'linux', workspaceDir: WS }) === 'npm test')
+rec('win32 无后端 → 原样', wrapCommandForSandbox('dir', { mode: 'workspace-write', platform: 'win32', workspaceDir: WS }) === 'dir')
+{
+	const w = wrapCommandForSandbox('npm test', { mode: 'workspace-write', platform: 'linux', workspaceDir: WS })
+	rec('linux 包装含 bwrap + 工作区bind + bash -c', w.startsWith('bwrap ') && w.includes(WS) && w.includes("/bin/bash -c 'npm test'"), w.slice(0, 80) + '...')
+}
+{
+	const w = wrapCommandForSandbox('ls', { mode: 'read-only', platform: 'darwin', workspaceDir: WS })
+	rec('darwin 包装含 sandbox-exec -p + bash -c', w.startsWith('sandbox-exec -p ') && w.includes("/bin/bash -c 'ls'"), w.slice(0, 60) + '...')
+}
+{
+	const w = wrapCommandForSandbox(`echo 'hi'`, { mode: 'workspace-write', platform: 'linux', workspaceDir: WS })
+	rec('命令含单引号被安全转义', w.includes(`'echo '\\''hi'\\'''`), w.slice(-40))
+}
 
 console.log('\n=========== 沙箱参数生成评测 ===========\n')
 let fail = false

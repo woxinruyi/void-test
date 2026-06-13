@@ -49,6 +49,12 @@
 ## 状态
 
 - **提案（设计）已创建**。
-- **纯生成层已执行（2026-06-13）**：`common/helpers/sandboxArgs.ts` —— `buildBwrapArgs`（Linux）/ `buildSeatbeltProfile`（macOS）/ 能力位，三档语义（read-only / workspace-write / full）；`sandboxArgsEval.ts`（14/14）+ `sandboxArgs.test.ts`。仅验证"参数/profile 生成"正确性。
-- **运行时接入未执行**：`terminalToolService` 的 `ISandboxRunner` 后端调用 + `sandbox_denied` 升级审批 + 真机端到端隔离验证，需目标 OS 运行时，单列一轮。Windows 后端最复杂（作业对象/AppContainer 或退化为审批增强）。
+- **纯生成层 + 命令包装层已执行（2026-06-13）**：`common/helpers/sandboxArgs.ts` ——
+  - `buildBwrapArgs`（Linux）/ `buildSeatbeltProfile`（macOS）/ 能力位，三档语义；
+  - `wrapCommandForSandbox(command, {mode, platform, workspaceDir})` —— 把一次性命令包装为 `bwrap … -- /bin/bash -c '<cmd>'`（Linux）/ `sandbox-exec -p '<profile>' /bin/bash -c '<cmd>'`（macOS），`full`/win32 优雅原样返回；含 POSIX 单引号安全转义 `shellSingleQuote`。
+  - `sandboxArgsEval.ts`（20/20）+ `sandboxArgs.test.ts`。**这是 sendText 接线将直接调用的构件，已逐字测试。**
+- **仅剩运行时部分（环境门槛）**：
+  - `terminalToolService.runCommand` 在 `mode!=='full'` 且一次性命令时改用 `wrapCommandForSandbox(...)` 后再 `sendText`（一行接线，但**需目标 OS + 已安装 bwrap 才能验证隔离真实生效**，故不在无运行时环境提交未验证接线）；
+  - `terminalSandboxMode` 设置项 + onboarding 信任档；
+  - `sandbox_denied` → 升级审批流；Windows 后端（作业对象/AppContainer）；真机端到端隔离验证。
 - 在运行时沙箱落地前，现有 allowlist + shell-metachar 防御 + dangerous 清单为既有缓解。

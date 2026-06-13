@@ -66,3 +66,37 @@ export const sandboxAllowsNetwork = (mode: SandboxMode): boolean => mode === 'fu
 
 /** 该档是否允许写工作区外（仅 full）。 */
 export const sandboxAllowsOutsideWorkspaceWrite = (mode: SandboxMode): boolean => mode === 'full';
+
+/** POSIX 单引号转义：' → '\'' 。用于把任意命令/profile 安全嵌入 bash -c。 */
+export const shellSingleQuote = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`;
+
+export type SandboxPlatform = 'linux' | 'darwin' | 'win32' | string;
+
+/**
+ * 将一次性命令包装为在沙箱中执行的命令串（供 terminal 的 sendText 调用）。
+ * - mode='full' / 不支持的平台(目前 win32 无后端) → 原样返回（优雅降级，零回退）。
+ * - linux → bwrap ... -- /bin/bash -c '<cmd>'
+ * - darwin → sandbox-exec -p '<profile>' /bin/bash -c '<cmd>'
+ * 注：仅适用一次性 run_command；持久终端跨命令状态不可用 bwrap 逐条包装。
+ *     真机隔离生效需运行时端到端验证（需目标 OS + 已安装 bwrap）。
+ */
+export const wrapCommandForSandbox = (
+	command: string,
+	opts: { mode: SandboxMode; platform: SandboxPlatform; workspaceDir: string },
+): string => {
+	const { mode, platform, workspaceDir } = opts;
+	if (mode === 'full') return command;
+
+	if (platform === 'linux') {
+		const args = buildBwrapArgs({ workspaceDir, mode });
+		if (!args) return command;
+		return `bwrap ${args.join(' ')} -- /bin/bash -c ${shellSingleQuote(command)}`;
+	}
+	if (platform === 'darwin') {
+		const profile = buildSeatbeltProfile({ workspaceDir, mode });
+		if (!profile) return command;
+		return `sandbox-exec -p ${shellSingleQuote(profile)} /bin/bash -c ${shellSingleQuote(command)}`;
+	}
+	// win32 / 其它：暂无沙箱后端，原样返回（见 add-terminal-sandbox 提案 Windows 后端）
+	return command;
+};
