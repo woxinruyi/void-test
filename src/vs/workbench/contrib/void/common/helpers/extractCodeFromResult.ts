@@ -186,6 +186,10 @@ export const endsWithAnyPrefixOf = (str: string, anyPrefix: string) => {
 // guarantees if you keep adding text, array length will strictly grow and state will progress without going back
 export const extractSearchReplaceBlocks = (str: string) => {
 
+	// CRLF 归一：标记按 '\n' 匹配，模型若输出 \r\n 会导致 indexOf 全部落空、整块解析失败。
+	// 归一后 orig/final 为 LF；应用阶段 findTextInCode 对行尾差异已容差，安全。见 add-searchreplace-crlf。
+	str = str.replace(/\r\n/g, '\n')
+
 	const ORIGINAL_ = ORIGINAL + `\n`
 	const DIVIDER_ = '\n' + DIVIDER + `\n`
 	// logic for FINAL_ is slightly more complicated - should be '\n' + FINAL, but that ignores if the final output is empty
