@@ -104,6 +104,9 @@ import './marketplaceService.js'
 // register AI code review (/review)
 import './reviewService.js'
 
+// register slash commands (/plan, /review, skills, .void/commands)
+import './slashCommandService.js'
+
 // ---------- common (unclear if these actually need to be imported, because they're already imported wherever they're used) ----------
 
 // llmMessage

@@ -756,6 +756,10 @@ export interface SkillInfo {
 	enabled: boolean;
 	/** 安装时间 */
 	installedAt: number;
+	/** 技能完整正文（渐进式披露：仅在被斜杠命令调起时使用；缓存后复用） */
+	body?: string;
+	/** 技能正文的拉取地址（无 body 缓存时按此加载；见 add-slash-commands） */
+	bodyUrl?: string;
 }
 
 export interface InstalledSkills {

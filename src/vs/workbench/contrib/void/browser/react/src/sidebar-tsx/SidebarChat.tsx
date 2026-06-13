@@ -19,6 +19,7 @@ import { PastThreadsList } from './SidebarThreadSelector.js';
 import { VOID_CTRL_L_ACTION_ID } from '../../../actionIDs.js';
 import { VOID_OPEN_SETTINGS_ACTION_ID } from '../../../voidSettingsPane.js';
 import { ChatMode, displayInfoOfProviderName, FeatureName, isFeatureNameDisabled } from '../../../../../../../workbench/contrib/void/common/voidSettingsTypes.js';
+import { SlashCommand } from '../../../../../../../workbench/contrib/void/common/slashCommands/slashCommandHelpers.js';
 import { ICommandService } from '../../../../../../../platform/commands/common/commands.js';
 import { WarningBox } from '../void-settings-tsx/WarningBox.js';
 import { t } from '../i18n/index.js';
@@ -2997,7 +2998,27 @@ export const SidebarChat = () => {
 		const threadId = chatThreadsService.state.currentThreadId
 
 		// send message to LLM
-		const userMessage = _forceSubmit || textAreaRef.current?.value || ''
+		let userMessage = _forceSubmit || textAreaRef.current?.value || ''
+
+		// 斜杠命令解析（仅对用户直接输入；_forceSubmit 透传不解析）
+		if (!_forceSubmit) {
+			try {
+				const resolution = await accessor.get('ISlashCommandService').resolveInput(userMessage)
+				if (resolution) {
+					if (resolution.kind === 'local-render') {
+						// 纯本地命令（如 /help）：直接展示，不发起 LLM 请求
+						accessor.get('INotificationService').info(resolution.text)
+						textAreaFnsRef.current?.setValue('')
+						textAreaRef.current?.focus()
+						return
+					}
+					// inject：用展开后的指令替换本轮发送内容
+					userMessage = resolution.instruction
+				}
+			} catch (e) {
+				console.error('slash command resolve failed:', e)
+			}
+		}
 
 		try {
 			await chatThreadsService.addUserMessageAndStreamResponse({ userMessage, threadId })
@@ -3124,9 +3145,28 @@ export const SidebarChat = () => {
 	</ScrollToBottomContainer>
 
 
+	// 斜杠命令候选：行首 `/` + 命令名前缀（尚未输入空格）时弹出，点击补全
+	const slashCommandsCacheRef = useRef<SlashCommand[] | null>(null)
+	const [slashCandidates, setSlashCandidates] = useState<SlashCommand[]>([])
+	const refreshSlashCandidates = useCallback(async (text: string) => {
+		const m = text.match(/^\s*\/([A-Za-z0-9_-]*)$/)
+		if (!m) { setSlashCandidates([]); return }
+		if (!slashCommandsCacheRef.current) {
+			try { slashCommandsCacheRef.current = await accessor.get('ISlashCommandService').listCommands() }
+			catch { slashCommandsCacheRef.current = [] }
+		}
+		const prefix = m[1].toLowerCase()
+		setSlashCandidates(slashCommandsCacheRef.current.filter(c => c.name.toLowerCase().startsWith(prefix)).slice(0, 8))
+	}, [accessor])
+	const pickSlashCommand = useCallback((name: string) => {
+		textAreaFnsRef.current?.setValue('/' + name + ' ')
+		setSlashCandidates([])
+		textAreaRef.current?.focus()
+	}, [textAreaFnsRef, textAreaRef])
 	const onChangeText = useCallback((newStr: string) => {
 		setInstructionsAreEmpty(!newStr)
-	}, [setInstructionsAreEmpty])
+		void refreshSlashCandidates(newStr)
+	}, [setInstructionsAreEmpty, refreshSlashCandidates])
 	const onKeyDown = useCallback((e: KeyboardEvent<HTMLTextAreaElement>) => {
 		if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
 			onSubmit()
@@ -3147,6 +3187,17 @@ export const SidebarChat = () => {
 		setSelections={setSelections}
 		onClickAnywhere={() => { textAreaRef.current?.focus() }}
 	>
+		{slashCandidates.length > 0 && <div className='flex flex-col gap-0.5 mb-1 max-h-48 overflow-y-auto'>
+			{slashCandidates.map(c => <div
+				key={c.source + '/' + c.name}
+				className='flex items-center gap-2 px-2 py-1 rounded cursor-pointer text-sm hover:bg-[var(--vscode-list-hoverBackground)]'
+				onMouseDown={(e) => { e.preventDefault(); pickSlashCommand(c.name) }}
+			>
+				<span className='font-mono whitespace-nowrap'>/{c.name}</span>
+				<span className='opacity-60 truncate'>{c.description}</span>
+				<span className='ml-auto opacity-40 text-xs'>{c.source}</span>
+			</div>)}
+		</div>}
 		<VoidInputBox2
 			enableAtToMention
 			className={`min-h-[81px] px-0.5 py-0.5`}

@@ -39,6 +39,7 @@ import { IPathService } from '../../../../../../../workbench/services/path/commo
 import { IMetricsService } from '../../../../../../../workbench/contrib/void/common/metricsService.js'
 import { URI } from '../../../../../../../base/common/uri.js'
 import { IChatThreadService, ThreadsState, ThreadStreamState } from '../../../chatThreadService.js'
+import { ISlashCommandService } from '../../../slashCommandService.js'
 import { ITerminalToolService } from '../../../terminalToolService.js'
 import { ILanguageService } from '../../../../../../../editor/common/languages/language.js'
 import { IVoidModelService } from '../../../../common/voidModelService.js'
@@ -247,6 +248,7 @@ const getReactAccessor = (accessor: ServicesAccessor) => {
 		IContextCompactionService: accessor.get(IContextCompactionService),
 		ICodeIndexService: accessor.get(ICodeIndexService),
 		IMarketplaceService: accessor.get(IMarketplaceService),
+		ISlashCommandService: accessor.get(ISlashCommandService),
 
 	} as const
 	return reactAccessor
