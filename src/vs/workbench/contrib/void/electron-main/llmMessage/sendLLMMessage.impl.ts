@@ -19,7 +19,7 @@ import { ChatMode, displayInfoOfProviderName, ModelSelectionOptions, OverridesOf
 import { getSendableReasoningInfo, getModelCapabilities, getProviderCapabilities, defaultProviderSettings, getReservedOutputTokenSpace } from '../../common/modelCapabilities.js';
 import { tryParseToolJson } from '../../common/helpers/repairToolJson.js';
 import { extractReasoningWrapper, extractXMLToolsWrapper } from './extractGrammar.js';
-import { availableTools, InternalToolInfo } from '../../common/prompt/prompts.js';
+import { availableTools, InternalToolInfo, splitSystemForCaching, stripCacheMarker } from '../../common/prompt/prompts.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -551,10 +551,18 @@ const sendAnthropicChat = async ({ messages, providerName, onText, onFinalMessag
 		dangerouslyAllowBrowser: true
 	});
 
-	// add-prompt-caching：system 转为数组形态并在末尾打缓存断点（仅在开关开启且有系统消息时）
-	const systemParam = (promptCaching && separateSystemMessage)
-		? [{ type: 'text' as const, text: separateSystemMessage, cache_control: { type: 'ephemeral' as const } }]
-		: (separateSystemMessage ?? undefined)
+	// add-system-prompt-caching：把稳定块单独打 cache_control，易变块（活动文件/IDE/git/目录/日期）放断点之后。
+	// 前缀匹配下，易变块每请求变化不破坏已缓存的稳定前缀（规则+工具定义+important notes），显著提升 system 缓存命中。
+	type SysBlock = { type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }
+	const systemParam: SysBlock[] | string | undefined =
+		!separateSystemMessage ? undefined
+			: !promptCaching ? stripCacheMarker(separateSystemMessage)
+				: (() => {
+					const { cacheable, volatile } = splitSystemForCaching(separateSystemMessage)
+					const blocks: SysBlock[] = [{ type: 'text', text: cacheable, cache_control: { type: 'ephemeral' } }]
+					if (volatile) blocks.push({ type: 'text', text: volatile })
+					return blocks
+				})()
 
 	const stream = anthropic.messages.stream({
 		system: systemParam,
@@ -854,7 +862,7 @@ const sendGeminiChat = async ({
 	genAI.models.generateContentStream({
 		model: modelName,
 		config: {
-			systemInstruction: separateSystemMessage,
+			systemInstruction: separateSystemMessage ? stripCacheMarker(separateSystemMessage) : undefined,
 			thinkingConfig: thinkingConfig,
 			tools: toolConfig,
 		},

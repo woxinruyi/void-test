@@ -736,7 +736,7 @@ Here's an example of a good code block:\n${chatSuggestionDiffExample}`)
 
 	details.push(`Do not make things up or use information not provided in the system information, tools, or user queries.`)
 	details.push(`Always use MARKDOWN to format lists, bullet points, etc. Do NOT write tables.`)
-	details.push(`Today's date is ${new Date().toDateString()}.`)
+	// 注：今日日期移至易变块（dateInfo），避免每日变更拉低稳定前缀缓存命中。
 
 	const importantDetails = (`Important notes:
 ${details.map((d, i) => `${i + 1}. ${d}`).join('\n\n')}`)
@@ -883,32 +883,37 @@ If the user's request relates to this failure, address it directly. Otherwise, t
 - If verification fails, fix the issues before continuing.
 - When in doubt, inform the user of the verification status before moving on.` : null
 
-	// return answer
-	const ansStrs: string[] = []
-	ansStrs.push(header)
-	ansStrs.push(sysInfo)
-	// P0-2: 新增段落在系统信息之后、工具定义之前
-	if (autonomyRules) ansStrs.push(autonomyRules)
-	if (codeQualityRules) ansStrs.push(codeQualityRules)
-	if (explorationRules) ansStrs.push(explorationRules)
-	if (toolStrategyRules) ansStrs.push(toolStrategyRules)
-	if (errorRecoveryRules) ansStrs.push(errorRecoveryRules)
-	if (codeModBestPractices) ansStrs.push(codeModBestPractices)
-	if (verificationPrompt) ansStrs.push(verificationPrompt)
-	if (planDiscipline) ansStrs.push(planDiscipline)
-	if (activeContextInfo) ansStrs.push(activeContextInfo)
-	if (ideActivityInfo) ansStrs.push(ideActivityInfo)
-	if (memoriesInfo) ansStrs.push(memoriesInfo)
-	if (skillsInfo) ansStrs.push(skillsInfo)
-	if (gitStatusInfo) ansStrs.push(gitStatusInfo)
-	if (projectStackInfo) ansStrs.push(projectStackInfo)
-	if (recentErrorsInfo) ansStrs.push(recentErrorsInfo)
-	if (planInfo) ansStrs.push(planInfo)
-	if (toolDefinitions) ansStrs.push(toolDefinitions)
-	ansStrs.push(importantDetails)
-	ansStrs.push(fsInfo)
+	const dateInfo = `Today's date is ${new Date().toDateString()}.`
 
-	const fullSystemMsgStr = ansStrs
+	// add-system-prompt-caching：稳定前缀在前（header + 规则段 + 工具定义 + important notes），最大化缓存命中；
+	// 易变上下文（活动文件/IDE/git/目录/计划/记忆/技能/日期）在断点标记之后。
+	const stableStrs: string[] = []
+	stableStrs.push(header)
+	if (autonomyRules) stableStrs.push(autonomyRules)
+	if (codeQualityRules) stableStrs.push(codeQualityRules)
+	if (explorationRules) stableStrs.push(explorationRules)
+	if (toolStrategyRules) stableStrs.push(toolStrategyRules)
+	if (errorRecoveryRules) stableStrs.push(errorRecoveryRules)
+	if (codeModBestPractices) stableStrs.push(codeModBestPractices)
+	if (verificationPrompt) stableStrs.push(verificationPrompt)
+	if (planDiscipline) stableStrs.push(planDiscipline)
+	if (toolDefinitions) stableStrs.push(toolDefinitions)
+	stableStrs.push(importantDetails)
+
+	const volatileStrs: string[] = []
+	volatileStrs.push(sysInfo)
+	if (activeContextInfo) volatileStrs.push(activeContextInfo)
+	if (ideActivityInfo) volatileStrs.push(ideActivityInfo)
+	if (memoriesInfo) volatileStrs.push(memoriesInfo)
+	if (skillsInfo) volatileStrs.push(skillsInfo)
+	if (gitStatusInfo) volatileStrs.push(gitStatusInfo)
+	if (projectStackInfo) volatileStrs.push(projectStackInfo)
+	if (recentErrorsInfo) volatileStrs.push(recentErrorsInfo)
+	if (planInfo) volatileStrs.push(planInfo)
+	volatileStrs.push(fsInfo)
+	volatileStrs.push(dateInfo)
+
+	const fullSystemMsgStr = [stableStrs.join('\n\n\n').trim(), CACHE_BREAKPOINT_MARKER, volatileStrs.join('\n\n\n').trim()]
 		.join('\n\n\n')
 		.trim()
 		.replace('\t', '  ')
@@ -916,6 +921,25 @@ If the user's request relates to this failure, address it directly. Otherwise, t
 	return fullSystemMsgStr
 
 }
+
+
+// add-system-prompt-caching：稳定前缀 / 易变上下文之间的断点标记。
+// 系统消息内"稳定块 + 标记 + 易变块"。Anthropic 路径据此把稳定块单独打 cache_control，
+// 易变块（活动文件/IDE/git/目录/日期等）放断点之后，变化不破坏已缓存的稳定前缀。
+export const CACHE_BREAKPOINT_MARKER = '<!-- void:cache-breakpoint -->'
+
+/** 将系统消息切为 { 稳定块(应缓存), 易变块 }。无标记时整体视为可缓存、易变为 null。 */
+export const splitSystemForCaching = (system: string): { cacheable: string; volatile: string | null } => {
+	const idx = system.indexOf(CACHE_BREAKPOINT_MARKER)
+	if (idx === -1) return { cacheable: system, volatile: null }
+	const cacheable = system.slice(0, idx).trim()
+	const volatile = system.slice(idx + CACHE_BREAKPOINT_MARKER.length).trim()
+	return { cacheable, volatile: volatile.length > 0 ? volatile : null }
+}
+
+/** 去除断点标记，得到普通单串（不做缓存切分的 provider 用）。 */
+export const stripCacheMarker = (system: string): string =>
+	system.split(CACHE_BREAKPOINT_MARKER).join('').replace(/\n{4,}/g, '\n\n\n').trim()
 
 
 // // log all prompts

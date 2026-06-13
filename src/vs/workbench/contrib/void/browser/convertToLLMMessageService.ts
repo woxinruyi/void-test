@@ -7,7 +7,7 @@ import { IWorkspaceContextService } from '../../../../platform/workspace/common/
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { ChatMessage } from '../common/chatThreadServiceTypes.js';
 import { getIsReasoningEnabledState, getReservedOutputTokenSpace, getModelCapabilities } from '../common/modelCapabilities.js';
-import { reParsedToolXMLString, chat_systemMessage } from '../common/prompt/prompts.js';
+import { reParsedToolXMLString, chat_systemMessage, stripCacheMarker } from '../common/prompt/prompts.js';
 import { AnthropicLLMChatMessage, AnthropicReasoning, GeminiLLMChatMessage, LLMChatMessage, LLMFIMMessage, OpenAILLMChatMessage, RawToolParamsObj } from '../common/sendLLMMessageTypes.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
 import { ChatMode, FeatureName, ModelSelection, ProviderName } from '../common/voidSettingsTypes.js';
@@ -405,11 +405,11 @@ const prepareOpenAIOrAnthropicMessages = ({
 	// if supports system message
 	if (supportsSystemMessage) {
 		if (supportsSystemMessage === 'separated')
-			separateSystemMessageStr = newSysMsg
+			separateSystemMessageStr = newSysMsg // 保留缓存断点标记，供 Anthropic 路径切分缓存块
 		else if (supportsSystemMessage === 'system-role')
-			llmMessages.unshift({ role: 'system', content: newSysMsg }) // add new first message
+			llmMessages.unshift({ role: 'system', content: stripCacheMarker(newSysMsg) }) // 去标记：openai-compat/聚合路径系统消息保持干净
 		else if (supportsSystemMessage === 'developer-role')
-			llmMessages.unshift({ role: 'developer', content: newSysMsg }) // add new first message
+			llmMessages.unshift({ role: 'developer', content: stripCacheMarker(newSysMsg) })
 	}
 	// if does not support system message
 	else {
