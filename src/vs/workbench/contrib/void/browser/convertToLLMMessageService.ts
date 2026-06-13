@@ -7,7 +7,7 @@ import { IWorkspaceContextService } from '../../../../platform/workspace/common/
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { ChatMessage } from '../common/chatThreadServiceTypes.js';
 import { getIsReasoningEnabledState, getReservedOutputTokenSpace, getModelCapabilities } from '../common/modelCapabilities.js';
-import { reParsedToolXMLString, chat_systemMessage, stripCacheMarker } from '../common/prompt/prompts.js';
+import { reParsedToolXMLString, chat_systemMessage, stripCacheMarker, truncateMiddle } from '../common/prompt/prompts.js';
 import { AnthropicLLMChatMessage, AnthropicReasoning, GeminiLLMChatMessage, LLMChatMessage, LLMFIMMessage, OpenAILLMChatMessage, RawToolParamsObj } from '../common/sendLLMMessageTypes.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
 import { ChatMode, FeatureName, ModelSelection, ProviderName } from '../common/voidSettingsTypes.js';
@@ -368,13 +368,13 @@ const prepareOpenAIOrAnthropicMessages = ({
 		// if can finish here, do
 		const numCharsWillTrim = m.content.length - TRIM_TO_LEN
 		if (numCharsWillTrim > remainingCharsToTrim) {
-			// trim remainingCharsToTrim + '...'.length chars
-			m.content = m.content.slice(0, m.content.length - remainingCharsToTrim - '...'.length).trim() + '...'
+			// 中间截断保留首尾（对标 Codex/CC），避免丢失消息尾部（如终端错误输出、结论），优于纯头部截断
+			m.content = truncateMiddle(m.content, m.content.length - remainingCharsToTrim)
 			break
 		}
 
 		remainingCharsToTrim -= numCharsWillTrim
-		m.content = m.content.substring(0, TRIM_TO_LEN - '...'.length) + '...'
+		m.content = truncateMiddle(m.content, TRIM_TO_LEN)
 		alreadyTrimmedIdxes.add(trimIdx)
 	}
 
