@@ -159,6 +159,8 @@ export const defaultModelsOfProvider = {
 	awsBedrock: [],
 	liteLLM: [],
 	aiyiwei: [
+		'gpt-5.5',
+		'gemini-3-pro-preview',
 		'claude-sonnet-4-6',
 		'claude-opus-4-6',
 		'claude-opus-4-8',
@@ -490,6 +492,38 @@ const extensiveModelOptionsFallback: VoidStaticProviderInfo['modelOptionsFallbac
 
 // ---------------- ANTHROPIC ----------------
 const anthropicModelOptions = {
+	'claude-opus-4-8': { // 1M 上下文 / 128K 输出 / $5·$25。4.7/4.8 已移除 budget_tokens（发送即 400），采用 effort + 自适应推理（见 anthropicSettings.includeInPayload）
+		contextWindow: 1_000_000,
+		reservedOutputTokenSpace: 64_000,
+		cost: { input: 5.00, cache_read: 0.50, cache_write: 6.25, output: 25.00 },
+		downloadable: false,
+		supportsFIM: false,
+		specialToolFormat: 'anthropic-style',
+		supportsSystemMessage: 'separated',
+		reasoningCapabilities: {
+			supportsReasoning: true,
+			canTurnOffReasoning: true,
+			canIOReasoning: true,
+			reasoningReservedOutputTokenSpace: 64_000,
+			reasoningSlider: { type: 'effort_slider', values: ['low', 'medium', 'high', 'xhigh', 'max'], default: 'high' },
+		},
+	},
+	'claude-opus-4-7': { // 同 4.8 能力面（adaptive thinking + effort），价格 $5·$25
+		contextWindow: 1_000_000,
+		reservedOutputTokenSpace: 64_000,
+		cost: { input: 5.00, cache_read: 0.50, cache_write: 6.25, output: 25.00 },
+		downloadable: false,
+		supportsFIM: false,
+		specialToolFormat: 'anthropic-style',
+		supportsSystemMessage: 'separated',
+		reasoningCapabilities: {
+			supportsReasoning: true,
+			canTurnOffReasoning: true,
+			canIOReasoning: true,
+			reasoningReservedOutputTokenSpace: 64_000,
+			reasoningSlider: { type: 'effort_slider', values: ['low', 'medium', 'high', 'xhigh', 'max'], default: 'high' },
+		},
+	},
 	'claude-3-7-sonnet-20250219': { // https://docs.anthropic.com/en/docs/about-claude/models/all-models#model-comparison-table
 		contextWindow: 200_000,
 		reservedOutputTokenSpace: 8_192,
@@ -590,6 +624,11 @@ const anthropicSettings: VoidStaticProviderInfo = {
 
 				if (reasoningInfo.type === 'budget_slider_value') {
 					return { thinking: { type: 'enabled', budget_tokens: reasoningInfo.reasoningBudget } }
+				}
+				// Opus 4.7/4.8 起 budget_tokens 已移除（发送即 400），effort 档位映射为自适应推理。
+				// 自适应模式由模型自行决定思考深度，无需 budget_tokens。
+				if (reasoningInfo.type === 'effort_slider_value') {
+					return { thinking: { type: 'adaptive' } }
 				}
 				return null
 			}
@@ -1464,6 +1503,40 @@ const openRouterSettings: VoidStaticProviderInfo = {
 
 // ---------------- AIYIWEI (aggregated AI provider) ----------------
 const aiyiweiModelOptions = {
+	// 经 aiyiwei 聚合（openai-style）调用的当前旗舰。价格取自 aiyiwei.vip/api/pricing（USD/M）；
+	// 上下文/输出/推理形态经官方文档核验；上下文沿用聚合层保守值 200K（与同组 claude 条目一致）。
+	'gpt-5.5': { // OpenAI 旗舰。原生 1M 上下文/128K 输出；reasoning.effort=low/medium/high/xhigh。aiyiwei default 分组 $2.5·$15/M
+		contextWindow: 200_000,
+		reservedOutputTokenSpace: 8_192,
+		cost: { input: 2.50, output: 15.00 },
+		downloadable: false,
+		supportsFIM: false,
+		specialToolFormat: 'openai-style' as const,
+		supportsSystemMessage: 'system-role' as const,
+		reasoningCapabilities: {
+			supportsReasoning: true,
+			canTurnOffReasoning: false,
+			canIOReasoning: true,
+			reasoningReservedOutputTokenSpace: 8192,
+			reasoningSlider: { type: 'effort_slider' as const, values: ['low', 'medium', 'high', 'xhigh'], default: 'medium' },
+		},
+	},
+	'gemini-3-pro-preview': { // Google 旗舰。原生 1M 上下文/64K 输出；thinking_level=low/high（经 openai-compat effort 映射）。aiyiwei 官转gemini 分组 $3·$18/M
+		contextWindow: 200_000,
+		reservedOutputTokenSpace: 8_192,
+		cost: { input: 3.00, output: 18.00 },
+		downloadable: false,
+		supportsFIM: false,
+		specialToolFormat: 'openai-style' as const,
+		supportsSystemMessage: 'system-role' as const,
+		reasoningCapabilities: {
+			supportsReasoning: true,
+			canTurnOffReasoning: false,
+			canIOReasoning: true,
+			reasoningReservedOutputTokenSpace: 8192,
+			reasoningSlider: { type: 'effort_slider' as const, values: ['low', 'high'], default: 'high' },
+		},
+	},
 	'claude-sonnet-4-6': {
 		contextWindow: 200_000,
 		reservedOutputTokenSpace: 8_192,
