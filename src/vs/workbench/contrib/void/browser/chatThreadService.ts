@@ -18,6 +18,7 @@ import { AutoApproveSettings, FeatureName, ModelSelection, ModelSelectionOptions
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
 import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, ToolCallParams, ToolName, ToolResult, resolveToolName } from '../common/toolsServiceTypes.js';
 import { resolveAutoApprove } from '../common/helpers/autoApprove.js';
+import { classifyLLMError } from '../common/helpers/classifyLLMError.js';
 import { resolveEffectiveTier, EffectiveTier } from '../common/helpers/reasoningAuto.js';
 import { tierToSendableReasoning, getModelCapabilities } from '../common/modelCapabilities.js';
 import { IToolsService } from './toolsService.js';
@@ -50,7 +51,6 @@ import { IContextCompactionService } from './contextCompactionService.js';
 
 // related to retrying when LLM message has error
 const CHAT_RETRIES = 3
-const RETRY_DELAY = 2500
 
 
 const findStagingSelectionIndex = (currentSelections: StagingSelectionItem[] | undefined, newSelection: StagingSelectionItem): number | null => {
@@ -1153,11 +1153,12 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 				}
 				// llm res error
 				else if (llmRes.type === 'llmError') {
-					// error, should retry
-					if (nAttempts < CHAT_RETRIES) {
+					// 按错误类型决定是否重试 + 退避：鉴权/请求格式错误重试无意义；限流/网络指数退避。未知错误保留原行为。
+					const errClass = classifyLLMError(llmRes.error)
+					if (errClass.retryable && nAttempts < CHAT_RETRIES) {
 						shouldRetryLLM = true
 						this._setStreamState(threadId, { isRunning: 'idle', interrupt: idleInterruptor })
-						await timeout(RETRY_DELAY)
+						await timeout(errClass.backoffMs(nAttempts - 1))
 						if (interruptedWhenIdle) {
 							this._setStreamState(threadId, undefined)
 							return

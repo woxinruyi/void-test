@@ -31,6 +31,10 @@ import { SubagentTask, SubagentTaskParams } from '../common/subagentServiceTypes
 import { IWebSearchService } from './webSearchService.js'
 import { IMemoryService } from './memoryService.js'
 import { IRemoteIndexService } from './remoteIndexService.js'
+import { IContextCompactionService } from './contextCompactionService.js'
+import { IChatThreadService } from './chatThreadService.js'
+import { getModelCapabilities } from '../common/modelCapabilities.js'
+import { computeContextBudget, formatContextBudget } from '../common/contextBudget.js'
 
 
 // tool use for AI
@@ -180,7 +184,7 @@ export class ToolsService implements IToolsService {
 		@IFileService fileService: IFileService,
 		@IWorkspaceContextService workspaceContextService: IWorkspaceContextService,
 		@ISearchService searchService: ISearchService,
-		@IInstantiationService instantiationService: IInstantiationService,
+		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IVoidModelService private readonly voidModelService: IVoidModelService,
 		@IEditCodeService editCodeService: IEditCodeService,
 		@ITerminalToolService private readonly terminalToolService: ITerminalToolService,
@@ -195,6 +199,7 @@ export class ToolsService implements IToolsService {
 		@IWebSearchService private readonly webSearchService: IWebSearchService,
 		@IMemoryService private readonly memoryService: IMemoryService,
 		@IRemoteIndexService private readonly remoteIndexService: IRemoteIndexService,
+		@IContextCompactionService private readonly contextCompactionService: IContextCompactionService,
 	) {
 		const queryBuilder = instantiationService.createInstance(QueryBuilder);
 
@@ -270,6 +275,10 @@ export class ToolsService implements IToolsService {
 				} = params
 				const uri = validateURI(uriUnknown)
 				return { uri }
+			},
+
+			get_context_remaining: (_params: RawToolParamsObj) => {
+				return {}
 			},
 
 			// ---
@@ -638,6 +647,19 @@ export class ToolsService implements IToolsService {
 				await timeout(1000)
 				const { lintErrors } = this._getLintErrors(uri)
 				return { result: { lintErrors } }
+			},
+
+			get_context_remaining: async () => {
+				// 懒解析 IChatThreadService 取当前线程消息，避免与 toolsService 形成构造期循环依赖
+				const chatThreadService = this.instantiationService.invokeFunction(accessor => accessor.get(IChatThreadService))
+				const threadId = chatThreadService.state.currentThreadId
+				const messages = chatThreadService.state.allThreads[threadId]?.messages ?? []
+				const usedTokens = this.contextCompactionService.estimateTokens(messages)
+				const sel = this.voidSettingsService.state.modelSelectionOfFeature['Chat']
+				const contextWindow = sel
+					? getModelCapabilities(sel.providerName, sel.modelName, this.voidSettingsService.state.overridesOfModel).contextWindow
+					: 0
+				return { result: computeContextBudget(usedTokens, contextWindow) }
 			},
 
 			// ---
@@ -1044,6 +1066,9 @@ export class ToolsService implements IToolsService {
 				return result.lintErrors ?
 					stringifyLintErrors(result.lintErrors)
 					: 'No lint errors found.'
+			},
+			get_context_remaining: (params, result) => {
+				return formatContextBudget(result)
 			},
 			// ---
 			create_file_or_folder: (params, result) => {

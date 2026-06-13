@@ -290,6 +290,12 @@ export const builtinTools: {
 		},
 	},
 
+	get_context_remaining: {
+		name: 'get_context_remaining',
+		description: `Returns the current context budget for this conversation: used / total / remaining tokens and percent used. Read-only, no parameters. On long or multi-step tasks, call this to self-moderate: if usage is high, stop gathering more context and act, wrap up, or summarize before continuing.`,
+		params: {},
+	},
+
 	// --- editing (create/delete) ---
 
 	create_file_or_folder: {

@@ -17,6 +17,7 @@ import { GoogleAuth } from 'google-auth-library'
 import { AnthropicLLMChatMessage, GeminiLLMChatMessage, LLMChatMessage, LLMFIMMessage, ModelListParams, OllamaModelResponse, OnError, OnFinalMessage, OnText, RawToolCallObj, RawToolParamsObj } from '../../common/sendLLMMessageTypes.js';
 import { ChatMode, displayInfoOfProviderName, ModelSelectionOptions, OverridesOfModel, ProviderName, SettingsOfProvider } from '../../common/voidSettingsTypes.js';
 import { getSendableReasoningInfo, getModelCapabilities, getProviderCapabilities, defaultProviderSettings, getReservedOutputTokenSpace } from '../../common/modelCapabilities.js';
+import { tryParseToolJson } from '../../common/helpers/repairToolJson.js';
 import { extractReasoningWrapper, extractXMLToolsWrapper } from './extractGrammar.js';
 import { availableTools, InternalToolInfo } from '../../common/prompt/prompts.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
@@ -283,12 +284,10 @@ const openAITools = (chatMode: ChatMode | null, mcpTools: InternalToolInfo[] | u
 
 // convert LLM tool call to our tool format
 const rawToolCallObjOfParamsStr = (name: string, toolParamsStr: string, id: string): RawToolCallObj | null => {
-	let input: unknown
-	try { input = JSON.parse(toolParamsStr) }
-	catch (e) { return null }
-
+	// 容错解析：精确失败时保守修复（尾随逗号/智能引号/截断），挽回否则会被丢弃的工具调用。
+	// 仅在裸 JSON.parse 失败时介入，不改变 happy-path 行为。见 add-toolcall-json-repair。
+	const input = tryParseToolJson(toolParamsStr)
 	if (input === null) return null
-	if (typeof input !== 'object') return null
 
 	const rawParams: RawToolParamsObj = input
 	return { id, name, rawParams, doneParams: Object.keys(rawParams), isDone: true }
