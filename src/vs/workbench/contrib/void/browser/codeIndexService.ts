@@ -16,6 +16,7 @@ import { hashAsync } from '../../../../base/common/hash.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
 import { ITreeSitterParserService } from '../../../../editor/common/services/treeSitterParserService.js';
 import { ISearchService, QueryType, resultIsMatch } from '../../../services/search/common/search.js';
+import { hashEmbed, cosineSimilarity } from '../common/helpers/hashEmbed.js';
 
 
 export interface ICodeIndexService {
@@ -405,57 +406,11 @@ class EmbeddingService {
 	}
 
 	async embed(text: string): Promise<Float32Array> {
-		return this._hashEmbed(text)
+		return hashEmbed(text, { dims: this.DIMS })
 	}
 
 	async embedBatch(texts: string[]): Promise<Float32Array[]> {
-		return texts.map(t => this._hashEmbed(t))
-	}
-
-	private _hashEmbed(text: string): Float32Array {
-		const vec = new Float32Array(this.DIMS)
-		const tokens = this._tokenize(text)
-
-		// Unigrams via feature hashing with sign trick
-		for (const token of tokens) {
-			const h = this._fnv1a(token)
-			const idx = h % this.DIMS
-			const sign = (this._fnv1a(token + '\x01') % 2 === 0) ? 1 : -1
-			vec[idx] += sign
-		}
-
-		// Bigrams for local context (weighted 0.5)
-		for (let i = 0; i < tokens.length - 1; i++) {
-			const bigram = tokens[i] + ' ' + tokens[i + 1]
-			const h = this._fnv1a(bigram)
-			const idx = h % this.DIMS
-			const sign = (this._fnv1a(bigram + '\x01') % 2 === 0) ? 1 : -1
-			vec[idx] += sign * 0.5
-		}
-
-		// L2 normalize
-		let norm = 0
-		for (let i = 0; i < this.DIMS; i++) norm += vec[i] * vec[i]
-		norm = Math.sqrt(norm)
-		if (norm > 0) for (let i = 0; i < this.DIMS; i++) vec[i] /= norm
-
-		return vec
-	}
-
-	private _tokenize(text: string): string[] {
-		return text.toLowerCase()
-			.replace(/[^a-z0-9_]/g, ' ')
-			.split(/\s+/)
-			.filter(t => t.length > 1 && t.length < 50)
-	}
-
-	private _fnv1a(str: string): number {
-		let hash = 2166136261
-		for (let i = 0; i < str.length; i++) {
-			hash ^= str.charCodeAt(i)
-			hash = (hash * 16777619) | 0
-		}
-		return hash >>> 0
+		return texts.map(t => hashEmbed(t, { dims: this.DIMS }))
 	}
 }
 
@@ -490,23 +445,11 @@ class VectorStore {
 
 		const scored = candidates.map(item => ({
 			metadata: item.metadata,
-			score: VectorStore._cosineSimilarity(queryEmbedding, item.embedding),
+			score: cosineSimilarity(queryEmbedding, item.embedding),
 		}))
 
 		scored.sort((a, b) => b.score - a.score)
 		return scored.slice(0, topK).map(s => ({ metadata: s.metadata, score: s.score, content: '' }))
-	}
-
-	private static _cosineSimilarity(a: Float32Array, b: Float32Array): number {
-		let dot = 0, normA = 0, normB = 0
-		const len = Math.min(a.length, b.length)
-		for (let i = 0; i < len; i++) {
-			dot += a[i] * b[i]
-			normA += a[i] * a[i]
-			normB += b[i] * b[i]
-		}
-		const denom = Math.sqrt(normA) * Math.sqrt(normB)
-		return denom === 0 ? 0 : dot / denom
 	}
 
 	async deleteByFilePath(filePath: string): Promise<void> {
