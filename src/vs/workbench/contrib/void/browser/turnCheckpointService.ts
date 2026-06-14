@@ -12,6 +12,7 @@ import { URI } from '../../../../base/common/uri.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
 import { hashAsync } from '../../../../base/common/hash.js';
 import { TurnManifest, TurnSummary, RevertResult } from '../common/turnCheckpointTypes.js';
+import { shouldFlagExternalModification } from '../common/helpers/revertConflict.js';
 
 
 export interface ITurnCheckpointService {
@@ -22,6 +23,7 @@ export interface ITurnCheckpointService {
 	abortTurn(turnId: string): Promise<void>
 
 	recordEdit(turnId: string, uri: URI, beforeContent: string): Promise<void>
+	recordEditAfter(turnId: string, uri: URI, afterContent: string): Promise<void>
 	recordCreate(turnId: string, uri: URI): Promise<void>
 	recordDelete(turnId: string, uri: URI, beforeContent: string): Promise<void>
 	recordCommand(turnId: string, command: string, cwd: string): Promise<void>
@@ -119,6 +121,19 @@ class TurnCheckpointService extends Disposable implements ITurnCheckpointService
 		}
 	}
 
+	// 回滚前检测：文件自智能体写入后是否被外部修改（当前内容 hash vs afterHash）。
+	// afterHash 缺失（旧 manifest）或文件读不到 → 不判冲突，保持向后兼容。
+	private async _isExternallyModified(fileUri: URI, afterHash: string | undefined): Promise<boolean> {
+		if (!afterHash) return false
+		try {
+			const cur = await this._fileService.readFile(fileUri)
+			const curHash = await this._hashContent(cur.value.toString())
+			return shouldFlagExternalModification(curHash, afterHash)
+		} catch {
+			return false
+		}
+	}
+
 	// --- Turn lifecycle ---
 
 	async beginTurn(threadId: string, turnId: string, userMessage: string): Promise<void> {
@@ -182,6 +197,23 @@ class TurnCheckpointService extends Disposable implements ITurnCheckpointService
 			beforeHash,
 		})
 		await this._writeManifest(manifest)
+	}
+
+	// 工具执行完成后回填 afterHash（= 智能体写入后的内容 hash），供回滚时检测外部修改。
+	// 回填该 uri 最近一条 edit/create 且尚无 afterHash 的 fileOp。
+	async recordEditAfter(turnId: string, uri: URI, afterContent: string): Promise<void> {
+		const manifest = manifestCache.get(turnId)
+		if (!manifest) return
+
+		const uriStr = uri.toString()
+		for (let i = manifest.fileOps.length - 1; i >= 0; i--) {
+			const op = manifest.fileOps[i]
+			if (op.uri === uriStr && (op.kind === 'edit' || op.kind === 'create') && !op.afterHash) {
+				op.afterHash = await this._hashContent(afterContent)
+				await this._writeManifest(manifest)
+				return
+			}
+		}
 	}
 
 	async recordCreate(turnId: string, uri: URI): Promise<void> {
@@ -264,11 +296,19 @@ class TurnCheckpointService extends Disposable implements ITurnCheckpointService
 						const content = await this._readSnapshotFile(threadId, manifest.turnId, op.beforeHash)
 						if (content !== null) {
 							const fileUri = URI.parse(op.uri)
+							// 覆写前：若文件自智能体写入后被外部修改，上报冲突（仍执行回滚，不丢回滚能力）
+							if (await this._isExternallyModified(fileUri, op.afterHash)) {
+								result.conflicts.push({ uri: op.uri, reason: 'modified externally since agent edit' })
+							}
 							await this._fileService.writeFile(fileUri, VSBuffer.fromString(content))
 							result.filesRestored++
 						}
 					} else if (op.kind === 'create' && op.uri) {
 						const fileUri = URI.parse(op.uri)
+						// 删除前：若新建文件自智能体写入后被外部修改，上报冲突（仍删除）
+						if (await this._isExternallyModified(fileUri, op.afterHash)) {
+							result.conflicts.push({ uri: op.uri, reason: 'modified externally since agent created it' })
+						}
 						try {
 							await this._fileService.del(fileUri)
 							result.filesDeleted++

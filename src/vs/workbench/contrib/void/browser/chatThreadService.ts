@@ -881,6 +881,19 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 			}
 
 			if (interrupted) { return { interrupted: true } } // the tool result is added where we interrupt, not here
+
+			// 回填 afterHash：工具成功执行后记录智能体写入后的内容 hash，供回滚检测外部修改（向后兼容、不阻塞主流程）
+			if (this._currentTurnId && (toolName === 'edit_file' || toolName === 'rewrite_file' || toolName === 'batch_edit' || toolName === 'create_file_or_folder')) {
+				const tid = this._currentTurnId
+				const uris: URI[] = toolName === 'batch_edit'
+					? (toolParams as BuiltinToolCallParams['batch_edit']).edits.map(e => e.uri)
+					: [(toolParams as BuiltinToolCallParams['edit_file'] | BuiltinToolCallParams['rewrite_file'] | BuiltinToolCallParams['create_file_or_folder']).uri]
+				for (const uri of uris) {
+					this._voidModelService.getModelSafe(uri).then(({ model }) => {
+						if (model) this._turnCheckpointService.recordEditAfter(tid, uri, model.getValue()).catch(() => { })
+					}).catch(() => { })
+				}
+			}
 		}
 		catch (error) {
 			resolveInterruptor(() => { }) // resolve for the sake of it
