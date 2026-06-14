@@ -1839,15 +1839,20 @@ export const tierToSendableReasoning = (
 
 	if (slider.type === 'effort_slider') {
 		const vals = slider.values
-		let idx: number
-		switch (tier) {
-			case 'default': idx = 0; break
-			case 'high': idx = Math.min(1, vals.length - 1); break
-			case 'max': idx = vals.length - 1; break
-			default: idx = vals.indexOf(slider.default)
+		// 对标 Claude Code：编码/agentic 的甜点是 xhigh，智力敏感任务最低 high。
+		// 按"偏好名"选择而非按索引，避免 default→low / high→medium 这类对编码过低的映射。
+		const pick = (preferred: string[]): string => {
+			for (const p of preferred) { if (vals.includes(p)) return p }
+			return vals[vals.length - 1] // 回退到最高可用档
 		}
-		if (idx < 0) idx = 0
-		return { type: 'effort_slider_value', isReasoningEnabled: true, reasoningEffort: vals[idx] }
+		let effort: string
+		switch (tier) {
+			case 'default': effort = pick(['medium', 'low', 'high']); break  // 平衡基线（优于原 'low'）
+			case 'high': effort = pick(['xhigh', 'high', 'medium']); break   // 编码/agentic 甜点
+			case 'max': effort = pick(['max', 'xhigh', 'high']); break
+			default: effort = vals.includes(slider.default) ? slider.default : vals[0]
+		}
+		return { type: 'effort_slider_value', isReasoningEnabled: true, reasoningEffort: effort }
 	}
 
 	return null
