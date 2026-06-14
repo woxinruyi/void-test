@@ -316,6 +316,12 @@ export class MCPChannel implements IServerChannel {
 		const { content } = response as CallToolResult
 		const returnValue = content[0]
 
+		// 防御：部分 MCP 服务可能返回空 content 数组，避免 returnValue 为 undefined 时抛出晦涩的 TypeError
+		if (!returnValue) {
+			if (response.isError) throw new Error(`Tool call error: tool ${toolName} on server ${serverName} returned an error with no content`)
+			return { event: 'text', text: '', toolName, serverName }
+		}
+
 		if (returnValue.type === 'text') {
 			// handle text response
 
