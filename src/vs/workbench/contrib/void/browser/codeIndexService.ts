@@ -51,6 +51,9 @@ const DEFAULT_IGNORE = [
 	'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',
 ]
 
+// 跳过超大文件：手写源码极少 > 1MB，超过的几乎都是生成物/数据文件，索引它们只会污染检索、拖慢索引
+const MAX_INDEX_FILE_BYTES = 1_000_000
+
 function isIgnored(name: string, patterns: string[]): boolean {
 	for (const p of patterns) {
 		if (p.startsWith('*') && name.endsWith(p.slice(1))) return true
@@ -843,6 +846,7 @@ class CodeIndexService extends Disposable implements ICodeIndexService {
 			for (const child of stat.children) {
 				if (isIgnored(child.name, ignorePatterns)) continue
 				if (child.isFile) {
+					if (child.size > MAX_INDEX_FILE_BYTES) continue // 跳过超大文件（生成物/数据文件）
 					yield child.resource
 				} else if (child.isDirectory) {
 					yield* this._walkFilesStream(child.resource, ignorePatterns)
