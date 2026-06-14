@@ -8,6 +8,7 @@ import { IEditorService } from '../../../services/editor/common/editorService.js
 import { ChatMessage } from '../common/chatThreadServiceTypes.js';
 import { getIsReasoningEnabledState, getReservedOutputTokenSpace, getModelCapabilities } from '../common/modelCapabilities.js';
 import { reParsedToolXMLString, chat_systemMessage, stripCacheMarker, truncateMiddle } from '../common/prompt/prompts.js';
+import { capByCharBudget } from '../common/helpers/capByCharBudget.js';
 import { AnthropicLLMChatMessage, AnthropicReasoning, GeminiLLMChatMessage, LLMChatMessage, LLMFIMMessage, OpenAILLMChatMessage, RawToolParamsObj } from '../common/sendLLMMessageTypes.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
 import { ChatMode, FeatureName, ModelSelection, ProviderName } from '../common/voidSettingsTypes.js';
@@ -666,7 +667,10 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 					const tagsStr = m.tags.length > 0 ? ` [${m.tags.join(', ')}]` : ''
 					return `- (id: ${m.id})${tagsStr} ${m.content}`
 				})
-				memoriesSummary = memLines.join('\n')
+				// 上限注入（对标 Claude Code 记忆自动加载上限）：保留最近的，避免随累积无界膨胀
+				const MAX_MEMORY_CHARS = 8000
+				const { kept, droppedCount } = capByCharBudget(memLines, MAX_MEMORY_CHARS)
+				memoriesSummary = (droppedCount > 0 ? `(showing ${kept.length} most recent of ${memLines.length} memories)\n` : '') + kept.join('\n')
 			}
 		} catch { /* ignore */ }
 
