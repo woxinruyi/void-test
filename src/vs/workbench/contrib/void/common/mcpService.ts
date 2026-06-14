@@ -16,7 +16,7 @@ import { IChannel } from '../../../../base/parts/ipc/common/ipc.js';
 import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js';
 import { MCPServerOfName, MCPConfigFileJSON, MCPServer, MCPToolCallParams, RawMCPToolCall, MCPServerEventResponse } from './mcpServiceTypes.js';
 import { Event, Emitter } from '../../../../base/common/event.js';
-import { InternalToolInfo } from './prompt/prompts.js';
+import { InternalToolInfo, truncateMiddle, MAX_TERMINAL_CHARS } from './prompt/prompts.js';
 import { IVoidSettingsService } from './voidSettingsService.js';
 import { MCPUserStateOfName } from './voidSettingsTypes.js';
 
@@ -310,7 +310,8 @@ class MCPService extends Disposable implements IMCPService {
 	stringifyResult(result: RawMCPToolCall): string {
 		let toolResultStr: string
 		if (result.event === 'text') {
-			toolResultStr = result.text
+			// 与内置工具一致：限界外部 MCP 服务返回的文本，避免冗长结果撑爆上下文
+			toolResultStr = truncateMiddle(result.text, MAX_TERMINAL_CHARS)
 		} else if (result.event === 'image') {
 			toolResultStr = `[Image: ${result.image.mimeType}]`
 		} else if (result.event === 'audio') {
