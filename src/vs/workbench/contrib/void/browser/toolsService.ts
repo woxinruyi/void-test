@@ -15,6 +15,7 @@ import { IVoidModelService } from '../common/voidModelService.js'
 import { EndOfLinePreference } from '../../../../editor/common/model.js'
 import { IVoidCommandBarService } from './voidCommandBarService.js'
 import { computeDirectoryTree1Deep, IDirectoryStrService, stringifyDirectoryTree1Deep } from '../common/directoryStrService.js'
+import { filterByScoreFloor } from '../common/helpers/retrievalFilter.js'
 import { IMarkerService, MarkerSeverity } from '../../../../platform/markers/common/markers.js'
 import { timeout } from '../../../../base/common/async.js'
 import { RawToolParamsObj } from '../common/sendLLMMessageTypes.js'
@@ -905,11 +906,13 @@ export class ToolsService implements IToolsService {
 
 			// --- semantic search ---
 			semantic_search: async ({ query, maxResults, searchInFolder }) => {
-				const results = await this.codeIndexService.search(
+				const raw = await this.codeIndexService.search(
 					query,
 					maxResults,
 					searchInFolder ? { searchInFolder: searchInFolder.fsPath } : undefined
 				)
+				// 相关性下限：裁掉近正交噪声/长尾，避免无相关内容时把"最不相关"也当匹配返回
+				const results = filterByScoreFloor(raw)
 				return { result: { results, totalMatches: results.length, indexStatus: this.codeIndexService.state } }
 			},
 
