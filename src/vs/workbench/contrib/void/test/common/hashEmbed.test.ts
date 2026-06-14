@@ -19,7 +19,8 @@ suite('Void - hash embedding (RAG)', () => {
 	test('确定性：同输入同输出', () => {
 		const a = hashEmbed('parseJsonSafely(raw)');
 		const b = hashEmbed('parseJsonSafely(raw)');
-		assert.strictEqual(cosineSimilarity(a, b), 1);
+		assert.deepStrictEqual(Array.from(a), Array.from(b)); // 逐元素相同（真确定性）
+		assert.ok(Math.abs(cosineSimilarity(a, b) - 1) < 1e-6); // 自相似 ≈ 1（Float32 容差）
 	});
 
 	test('子词匹配：char-trigram 让 "user profile" 命中 "updateUserProfile"（improved > baseline）', () => {
