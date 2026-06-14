@@ -43,4 +43,5 @@
 
 ## 状态
 
-- **分析 + 提案已建（2026-06-14）**。**实现待真机 E2E 核验**编辑落盘时机与回滚链路后执行（向后兼容、警告-only，零回归风险面已界定）。
+- **已执行（2026-06-14，commit 6b55ff5）**：纯函数 `shouldFlagExternalModification`（eval 4/4 + mocha）、`recordEditAfter` 回填 afterHash、`revertTo` 覆写/删除前比较并上报 conflict、`chatThreadService` 工具执行后捕获 afterHash。tsc 0 errors，逻辑层闭环。
+- **待真机 E2E 核验**（本无头环境不可验证，用户已同意接受）：① 工具执行后 `model.getValue()` 已是最终落盘内容（afterHash 捕获时机正确）；② 编辑→轮外手动改→回滚→既有"externally modified"警告弹出且文件正确回滚。向后兼容（旧 manifest 无 afterHash → 行为同今），零回归风险面已界定。
